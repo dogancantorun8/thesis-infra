@@ -301,24 +301,3 @@ thesis-infra/
 └── docs/                        # Operational documentation
     └── FIRST_LOOK.md            # Quick-reference for daily use
 ```
-
----
-
-## Engineering Challenges
-
-A growing log of non-trivial bugs and design dead-ends encountered while
-building this system — see **[ENGINEERING_CHALLENGES.md](./ENGINEERING_CHALLENGES.md)**.
-
-Currently 18 entries (EC#1–EC#18). EC#1–13 are documented in their
-resolving commit messages (`git log --grep="EC#"`); EC#14–18 are
-documented in detail in `ENGINEERING_CHALLENGES.md` with symptom, root
-cause, fix, and design notes.
-
-The documentation pattern itself is a thesis contribution — "what could
-go wrong, and how was it discovered" is as important as the architecture.
-
----
-
-## License
-
-MIT — see `LICENSE`. This work is part of an academic Master's thesis.
