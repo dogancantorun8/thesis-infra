@@ -6,7 +6,7 @@
 #   - config file (binds to 127.0.0.1:8889)
 #   - notebooks directory
 #   - systemd unit (auto-start on boot)
-#   - regenerate scripts/port-forward-all.sh (Jupyter included automatically)
+#   - regenerate scripts/observability/port-forward-all.sh (Jupyter included automatically)
 #
 # Security: Jupyter listens only on 127.0.0.1. Access is via SSH port-forward
 # (VSCode Remote-SSH handles this transparently). Token auth disabled —
@@ -108,10 +108,10 @@
         status_code: 200
       register: jupyter_response
 
-    - name: Re-render scripts so port-forward-all.sh includes Jupyter
+    - name: Re-render scripts so observability/port-forward-all.sh includes Jupyter
       template:
         src: "{{ thesis_repo }}/files/scripts/port-forward-all.sh.j2"
-        dest: "{{ thesis_repo }}/scripts/port-forward-all.sh"
+        dest: "{{ thesis_repo }}/scripts/observability/port-forward-all.sh"
         mode: '0755'
 
     - name: Display final summary
@@ -124,11 +124,11 @@
           Config file:     {{ jupyter_config_dir }}/jupyter_lab_config.py
           Notebooks dir:   {{ jupyter_notebooks_dir }}
 
-          Helper script regenerated: scripts/port-forward-all.sh
+          Helper script regenerated: scripts/observability/port-forward-all.sh
           (now includes Jupyter Lab on port {{ jupyter_port }})
 
           To access:
-            ./scripts/port-forward-all.sh restart
+            ./scripts/observability/port-forward-all.sh restart
             Browser: http://localhost:{{ jupyter_port }}/lab
 
           Useful commands:

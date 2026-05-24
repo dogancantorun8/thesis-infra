@@ -256,7 +256,7 @@
         msg: |
           MinIO port-forward NOT detected on localhost:9000.
           Run before retrying 'dvc push':
-            ./scripts/port-forward-all.sh
+            ./scripts/observability/port-forward-all.sh
       when: minio_pf.stdout == "no"
 
     - name: Add C-MAPSS data to DVC tracking

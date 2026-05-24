@@ -138,7 +138,7 @@
             prometheus-kube-prometheus-alertmanager.{{ monitoring_namespace }}.svc.cluster.local:9093
 
           To access from your laptop:
-            ./scripts/port-forward-all.sh restart
+            ./scripts/observability/port-forward-all.sh restart
 
           Grafana login:
             user: admin

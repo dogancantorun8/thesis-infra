@@ -390,6 +390,46 @@ def main():
     log.info(f"Baseline counts: {baseline_counts.tolist()}")
     log.info(f"Production counts: {production_counts.tolist()}")
 
+    # EC#18: Bucket alignment + empty-traffic guard.
+    # Prometheus `increase()` over a 1h window may return one fewer
+    # bucket than baseline when traffic is sparse. Two fixes:
+    #   (a) Pad production_counts with zeros to match baseline length.
+    #   (b) If production has zero total traffic, skip PSI/KS and emit
+    #       a clean "no signal" state.
+    if len(production_counts) < len(baseline_counts):
+        n_missing = len(baseline_counts) - len(production_counts)
+        log.warning(
+            f"Production histogram has {n_missing} fewer buckets than baseline; "
+            f"padding with zeros"
+        )
+        production_counts = np.concatenate(
+            [production_counts, np.zeros(n_missing)]
+        )
+    elif len(production_counts) > len(baseline_counts):
+        log.warning("Production histogram is longer than baseline; truncating")
+        production_counts = production_counts[: len(baseline_counts)]
+
+    if production_counts.sum() == 0:
+        log.info("No production traffic in 1h window — skipping drift evaluation")
+        psi = 0.0
+        ks_stat = 0.0
+        ks_pvalue = 1.0
+        drift_detected = False
+        log.info(f"PSI = {psi:.4f} (no signal)")
+        log.info(f"KS statistic = {ks_stat:.4f}, p-value = {ks_pvalue:.4f} (no signal)")
+        log.info(f"Drift detected: {drift_detected} (no traffic)")
+        push_metrics({
+            "drift_psi": (psi, "Population Stability Index"),
+            "drift_ks_statistic": (ks_stat, "KS-test statistic"),
+            "drift_ks_pvalue": (ks_pvalue, "KS-test p-value"),
+            "drift_detected": (int(drift_detected), "1 if drift detected, 0 otherwise"),
+            "drift_check_no_data": (0, "1 if no production data available"),
+        })
+        log.info("✓ Metrics pushed (zero-traffic state)")
+        log.info("=" * 60)
+        log.info(f"Drift check complete — PSI={psi:.4f}, drift={drift_detected}")
+        log.info("=" * 60)
+        return 0
     # Step 3: PSI
     psi = compute_psi(baseline_counts, production_counts)
     log.info(f"PSI = {psi:.4f} (threshold: {PSI_THRESHOLD})")

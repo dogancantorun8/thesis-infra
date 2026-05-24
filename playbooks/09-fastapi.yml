@@ -295,7 +295,7 @@
           /predict:     {{ predict_test.stdout }}
 
           Browser access (after port-forward):
-            ./scripts/port-forward-all.sh restart
+            ./scripts/observability/port-forward-all.sh restart
             http://localhost:8000          (root info)
             http://localhost:8000/docs     (interactive Swagger UI)
             http://localhost:8000/metrics  (Prometheus metrics)

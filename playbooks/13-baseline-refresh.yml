@@ -1,0 +1,258 @@
+---
+# playbooks/13-baseline-refresh.yml
+#
+# Baseline refresh — keeps the drift detection baseline ConfigMap in
+# sync with the current MLflow @production alias. Decoupled from
+# inference (FastAPI) and detection (Evidently CronJob).
+#
+# Three phases:
+#   1. Build container image (nerdctl + buildkit, same toolchain as
+#      Playbook 09 / 12)
+#   2. RBAC: ServiceAccount + Role + RoleBinding so the Job can
+#      read/write the evidently-baseline ConfigMap
+#   3. CronJob template (suspended) — used purely as a manifest
+#      template. Triggered with:
+#        kubectl create job --from=cronjob/baseline-refresh \
+#          -n monitoring baseline-refresh-trigger-$(date +%s)
+#
+# Triggers (event-driven, no polling):
+#   - Notebook 03 last cell after alias promotion
+#   - KFP retraining pipeline (Adim 4)
+#   - Manual operator action
+#
+# The Job is idempotent: if ConfigMap baseline version already
+# matches MLflow alias, the script exits 0 without rewriting.
+
+- name: Baseline refresh — image build + RBAC + Job template
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+
+  vars_files:
+    - ../inventory/group_vars/vault.yml
+
+  vars:
+    thesis_repo: "/root/thesis-infra"
+    venv_python: "/root/thesis-infra/.venv/bin/python"
+    monitoring_namespace: monitoring
+    baseline_refresh_sa: baseline-refresh-sa
+    baseline_refresh_role: baseline-refresh-role
+    baseline_refresh_binding: baseline-refresh-binding
+    cronjob_name: baseline-refresh
+
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+  tasks:
+
+    # ──────────────────────────────────────────────────────────────
+    # Phase 1: Container image (nerdctl + buildkit, containerd)
+    # ──────────────────────────────────────────────────────────────
+
+    - name: "[Phase 1] Check if baseline-refresh image already exists"
+      command: >
+        nerdctl --address /run/k3s/containerd/containerd.sock
+        --namespace k8s.io
+        images {{ baseline_refresh_image }}
+      register: baseline_refresh_image_check
+      changed_when: false
+      failed_when: false
+
+    - name: "[Phase 1] Build baseline-refresh image (nerdctl + buildkit)"
+      command: >
+        nerdctl --address /run/k3s/containerd/containerd.sock
+        --namespace k8s.io
+        build
+        --buildkit-host unix:///run/buildkit/buildkitd.sock
+        -t {{ baseline_refresh_image }}
+        {{ thesis_repo }}/files/baseline-refresh/
+      register: baseline_refresh_build
+      changed_when: "'Successfully tagged' in (baseline_refresh_build.stdout + baseline_refresh_build.stderr)"
+      when: "baseline_refresh_image_name not in baseline_refresh_image_check.stdout"
+
+    - name: "[Phase 1] Verify image is available in containerd"
+      command: >
+        nerdctl --address /run/k3s/containerd/containerd.sock
+        --namespace k8s.io
+        images {{ baseline_refresh_image }}
+      register: baseline_refresh_image_verify
+      changed_when: false
+
+    - name: "[Phase 1] Display image info"
+      debug:
+        msg: |
+          ✓ baseline-refresh image ready: {{ baseline_refresh_image }}
+          {{ baseline_refresh_image_verify.stdout }}
+
+    # ──────────────────────────────────────────────────────────────
+    # Phase 2: RBAC (ServiceAccount + Role + RoleBinding)
+    # ──────────────────────────────────────────────────────────────
+
+    - name: "[Phase 2] Ensure monitoring namespace exists"
+      kubernetes.core.k8s:
+        api_version: v1
+        kind: Namespace
+        name: "{{ monitoring_namespace }}"
+        state: present
+
+    - name: "[Phase 2] Apply ServiceAccount, Role, and RoleBinding"
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          - apiVersion: v1
+            kind: ServiceAccount
+            metadata:
+              name: "{{ baseline_refresh_sa }}"
+              namespace: "{{ monitoring_namespace }}"
+
+          - apiVersion: rbac.authorization.k8s.io/v1
+            kind: Role
+            metadata:
+              name: "{{ baseline_refresh_role }}"
+              namespace: "{{ monitoring_namespace }}"
+            rules:
+              - apiGroups: [""]
+                resources: ["configmaps"]
+                verbs: ["get", "create", "update", "patch"]
+                resourceNames: ["evidently-baseline"]
+              - apiGroups: [""]
+                resources: ["configmaps"]
+                verbs: ["create"]
+
+          - apiVersion: rbac.authorization.k8s.io/v1
+            kind: RoleBinding
+            metadata:
+              name: "{{ baseline_refresh_binding }}"
+              namespace: "{{ monitoring_namespace }}"
+            subjects:
+              - kind: ServiceAccount
+                name: "{{ baseline_refresh_sa }}"
+                namespace: "{{ monitoring_namespace }}"
+            roleRef:
+              kind: Role
+              name: "{{ baseline_refresh_role }}"
+              apiGroup: rbac.authorization.k8s.io
+
+    # ──────────────────────────────────────────────────────────────
+    # Phase 3: CronJob template (suspended; used only via
+    # `kubectl create job --from=cronjob/baseline-refresh`)
+    # ──────────────────────────────────────────────────────────────
+
+    - name: "[Phase 3] Read MinIO credentials from secret (for S3 env vars)"
+      command: >
+        kubectl get secret minio -n minio
+        -o jsonpath={{ item.path }}
+      loop:
+        - { name: 'access_key', path: '{.data.rootUser}' }
+        - { name: 'secret_key', path: '{.data.rootPassword}' }
+      register: minio_creds
+      changed_when: false
+
+    - name: "[Phase 3] Decode MinIO credentials"
+      set_fact:
+        minio_access_key: "{{ minio_creds.results[0].stdout | b64decode }}"
+        minio_secret_key: "{{ minio_creds.results[1].stdout | b64decode }}"
+      no_log: true
+
+    - name: "[Phase 3] Apply baseline-refresh CronJob (suspended template)"
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: batch/v1
+          kind: CronJob
+          metadata:
+            name: "{{ cronjob_name }}"
+            namespace: "{{ monitoring_namespace }}"
+            labels:
+              app: baseline-refresh
+              role: drift-detection
+          spec:
+            # Schedule is a placeholder — the CronJob is SUSPENDED.
+            # We use it only as a manifest template:
+            #   kubectl create job --from=cronjob/baseline-refresh ...
+            schedule: "0 0 31 2 *"   # Feb 31 — never fires
+            suspend: true
+            concurrencyPolicy: Forbid
+            successfulJobsHistoryLimit: 3
+            failedJobsHistoryLimit: 3
+            jobTemplate:
+              spec:
+                backoffLimit: 1
+                ttlSecondsAfterFinished: 600
+                template:
+                  metadata:
+                    labels:
+                      app: baseline-refresh
+                  spec:
+                    restartPolicy: Never
+                    serviceAccountName: "{{ baseline_refresh_sa }}"
+                    containers:
+                      - name: refresh
+                        image: "{{ baseline_refresh_image }}"
+                        imagePullPolicy: IfNotPresent
+                        env:
+                          - name: MLFLOW_TRACKING_URI
+                            value: "http://mlflow.mlops.svc.cluster.local:5000"
+                          - name: MLFLOW_S3_ENDPOINT_URL
+                            value: "http://minio.minio.svc.cluster.local:9000"
+                          - name: MODEL_NAME
+                            value: "cmapss-rul"
+                          - name: MODEL_ALIAS
+                            value: "production"
+                          - name: S3_BUCKET
+                            value: "thesis-data"
+                          - name: S3_KEY
+                            value: "processed/X_train.npy"
+                          - name: AWS_DEFAULT_REGION
+                            value: "us-east-1"
+                          - name: AWS_ACCESS_KEY_ID
+                            value: "{{ minio_access_key }}"
+                          - name: AWS_SECRET_ACCESS_KEY
+                            value: "{{ minio_secret_key }}"
+                          - name: CONFIGMAP_NAME
+                            value: "evidently-baseline"
+                          - name: CONFIGMAP_NAMESPACE
+                            value: "{{ monitoring_namespace }}"
+                          - name: HOST_DISK_PATH
+                            value: "/mnt/host-data/baseline.json"
+                        volumeMounts:
+                          - name: host-drift-dir
+                            mountPath: /mnt/host-data
+                        resources:
+                          requests:
+                            cpu: 200m
+                            memory: 512Mi
+                          limits:
+                            cpu: 1000m
+                            memory: 2Gi
+                    volumes:
+                      - name: host-drift-dir
+                        hostPath:
+                          path: "{{ thesis_repo }}/data/drift"
+                          type: DirectoryOrCreate
+
+    - name: "[Phase 3] Display deployment info"
+      debug:
+        msg: |
+          ✓ baseline-refresh deployed:
+            - Namespace:      {{ monitoring_namespace }}
+            - ServiceAccount: {{ baseline_refresh_sa }}
+            - Image:          {{ baseline_refresh_image }}
+            - CronJob:        {{ cronjob_name }} (SUSPENDED — used as template only)
+
+          Manually trigger a refresh:
+            kubectl create job --from=cronjob/{{ cronjob_name }} \
+              -n {{ monitoring_namespace }} \
+              baseline-refresh-trigger-$(date +%s)
+
+          View logs:
+            kubectl logs -n {{ monitoring_namespace }} \
+              -l app=baseline-refresh --tail=50
+
+          From Notebook 03 (Python):
+            subprocess.run([
+              "kubectl", "create", "job",
+              "--from=cronjob/{{ cronjob_name }}",
+              "-n", "{{ monitoring_namespace }}",
+              f"baseline-refresh-trigger-{int(time.time())}"
+            ], check=True)

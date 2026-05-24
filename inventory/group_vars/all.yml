@@ -72,7 +72,7 @@ jupyter_notebooks_dir: "/root/thesis-infra/notebooks"
 
 
 # === Port-forward services (centralized list) ===
-# Consumed by scripts/port-forward-all.sh.j2 template.
+# Consumed by scripts/observability/port-forward-all.sh.j2 template.
 # Each entry: name, namespace, resource, local_port, remote_port, type
 # type 'kubectl'  → uses kubectl port-forward (default)
 # type 'ssh-only' → already listening on VM localhost (no kubectl needed)
@@ -144,5 +144,13 @@ evidently_namespace: monitoring
 pushgateway_chart_version: "2.15.0"
 pushgateway_release_name: prometheus-pushgateway
 evidently_image_name: "thesis/evidently-drift"
-evidently_image_tag: "0.1.4"
+evidently_image_tag: "0.1.7"
 evidently_image: "{{ evidently_image_name }}:{{ evidently_image_tag }}"
+
+# Baseline refresh (Playbook 13) - regenerates drift baseline for
+# the current MLflow @production model version and applies it as
+# the evidently-baseline ConfigMap. Triggered as a K8s Job by
+# Notebook 03 / KFP pipeline / manual operator.
+baseline_refresh_image_name: "thesis/baseline-refresh"
+baseline_refresh_image_tag: "0.1.2"
+baseline_refresh_image: "{{ baseline_refresh_image_name }}:{{ baseline_refresh_image_tag }}"

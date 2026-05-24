@@ -3,7 +3,7 @@
   Closed-Loop MLOps Recovery Cycle Measurement
 ======================================================================
 
-  Executed:    2026-05-17T21:39:38.687060+00:00
+  Executed:    2026-05-24T22:28:27.259676+00:00
   Host:        Hetzner CCX23 (16GB CPU-only k3s)
   Repo:        /root/thesis-infra
 
@@ -22,31 +22,31 @@
   TIMESTAMPS
 ──────────────────────────────────────────────────────────────────────
 
-  T0  2026-05-17T20:18:01.355377+00:00
-  T1  2026-05-17T20:25:08.668281+00:00
-  T2  2026-05-17T20:40:59.457297+00:00
-  T_RT 2026-05-17T20:43:37.294118+00:00
-  T4  2026-05-17T20:56:07.425549+00:00
-  T5  2026-05-17T21:17:03.667490+00:00
+  T0  2026-05-24T22:15:30.405739+00:00
+  T1  2026-05-24T22:17:47.828696+00:00
+  T2  2026-05-24T22:17:47.929463+00:00
+  T_RT 2026-05-24T22:20:55.737656+00:00
+  T4  2026-05-24T22:21:20.129551+00:00
+  T5  2026-05-24T22:28:26.760485+00:00
 
 ──────────────────────────────────────────────────────────────────────
   PHASE BREAKDOWN
 ──────────────────────────────────────────────────────────────────────
 
-  Detection lag     (T0 → T1)     7.12 min  [system]
-  Trigger lag       (T1 → T2)    15.85 min  [manual overhead]
-  Retraining        (T2 → T_RT)   2.63 min  [system]
-  Pod rollout       (T_RT → T4)  12.50 min  [system]
-  Verification      (T4 → T5)    20.94 min  [experiment overhead]
+  Detection lag     (T0 → T1)     2.29 min  [system]
+  Trigger lag       (T1 → T2)     0.00 min  [manual overhead]
+  Retraining        (T2 → T_RT)   3.13 min  [system]
+  Pod rollout       (T_RT → T4)   0.41 min  [system]
+  Verification      (T4 → T5)     7.11 min  [experiment overhead]
 
 ──────────────────────────────────────────────────────────────────────
   KEY RESULTS
 ──────────────────────────────────────────────────────────────────────
 
-  Core system recovery  (T4-T1)    30.98 min     ← thesis primary result
-  Retraining + rollout  (T4-T2)    15.13 min     ← projected for Adim 4
-  Total measured        (T5-T1)    51.92 min
-  Full cycle            (T5-T0)    59.04 min
+  Core system recovery  (T4-T1)     3.54 min     ← thesis primary result
+  Retraining + rollout  (T4-T2)     3.54 min     ← projected for Adim 4
+  Total measured        (T5-T1)    10.65 min
+  Full cycle            (T5-T0)    12.94 min
 
 ──────────────────────────────────────────────────────────────────────
   DRIFT SIGNAL
@@ -57,15 +57,15 @@
   Difference:                     42.25 cycles (well above 20-cycle threshold)
 
   PSI at T1 (drift detected):     8.8018  (catastrophic)
-  PSI at T5 (recovery confirmed): 0.0985  (well below 0.2 threshold)
-  Improvement factor:             89x
+  PSI at T5 (recovery confirmed): 0.1216  (well below 0.2 threshold)
+  Improvement factor:             72x
 
 ──────────────────────────────────────────────────────────────────────
   MODEL VERSIONS
 ──────────────────────────────────────────────────────────────────────
 
   Before drift:    v6 (trained on FD001, MLflow @production)
-  After recovery:  v8 (re-trained on FD001, identical metrics RMSE=13.54)
+  After recovery:  v18 (re-trained on FD001, identical metrics RMSE=13.54)
 
   Note: v6 baseline and v8 baseline are IDENTICAL because Notebook 03
   is deterministic (fixed random seed). Recovery comes from production
@@ -93,14 +93,14 @@
 ──────────────────────────────────────────────────────────────────────
 
   'The closed-loop drift recovery system completes the recovery
-   cycle in 31.0 minutes on Hetzner CCX23 (16GB CPU-only),
-   including model retraining (2.6 min) and pod rollout
-   (12.5 min). Manual workflow overhead
-   (15.8 min trigger + 20.9 min verification)
+   cycle in 3.5 minutes on Hetzner CCX23 (16GB CPU-only),
+   including model retraining (3.1 min) and pod rollout
+   (0.4 min). Manual workflow overhead
+   (0.0 min trigger + 7.1 min verification)
    reflects experiment design and will be eliminated in Adim 4
    by replacing manual triggers with an Alertmanager webhook to
    the Kubeflow retraining pipeline. Projected production recovery
-   latency: 15.1 minutes.'
+   latency: 3.5 minutes.'
 
 ──────────────────────────────────────────────────────────────────────
   OUTPUT FILES

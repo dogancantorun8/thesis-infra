@@ -3,7 +3,7 @@
 # Renders helper bash scripts from Jinja2 templates in files/scripts/.
 #
 # Why this exists:
-# Operational helper scripts (port-forward-all.sh, future healthcheck
+# Operational helper scripts (observability/port-forward-all.sh, future healthcheck
 # variants) used to be hand-maintained. Every time a new service was
 # added by a playbook, the bash script had to be edited manually,
 # causing drift between infrastructure and tooling.
@@ -26,13 +26,13 @@
     - name: Render port-forward-all.sh from template
       template:
         src: "{{ thesis_repo }}/files/scripts/port-forward-all.sh.j2"
-        dest: "{{ thesis_repo }}/scripts/port-forward-all.sh"
+        dest: "{{ thesis_repo }}/scripts/observability/port-forward-all.sh"
         mode: '0755'
 
     - name: Display rendered script status
       debug:
         msg: |
-          Rendered: scripts/port-forward-all.sh
+          Rendered: scripts/observability/port-forward-all.sh
           Services: {{ port_forward_services | length }} total
             kubectl: {{ port_forward_services | selectattr('type', 'equalto', 'kubectl') | list | length }}
             ssh-only: {{ port_forward_services | selectattr('type', 'equalto', 'ssh-only') | list | length }}

@@ -1,0 +1,8 @@
+mlflow==2.18.0
+numpy==2.1.2
+boto3==1.35.0
+
+# PyTorch CPU-only — required to load mlflow.pytorch flavor models.
+# Same pattern as files/fastapi/app/requirements.txt
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.0+cpu

@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-05-17T22:05:24.026176+00:00",
-  "model_version": "8",
+  "generated_at": "2026-05-24T22:21:30.984125+00:00",
+  "model_version": "18",
   "model_uri": "models:/cmapss-rul@production",
   "training_set_size": 14459,
   "prediction_stats": {
