@@ -64,11 +64,15 @@ flowchart TB
                 KFP["Kubeflow Pipelines Standalone (14 pods)<br/>KFP API · UI · ml-metadata · Argo<br/>workflow-controller · persistence-agent<br/>bundled MySQL + seaweedfs (internal cache)<br/>NOT installed: Istio, Dex, KServe, Katib, Notebooks"]
             end
 
-            subgraph MON["monitoring namespace (Playbook 08) — DEPLOYED"]
+            subgraph MON["monitoring namespace (Playbooks 08, 12, 13) — DEPLOYED"]
                 PROM["Prometheus (kube-prometheus-stack 85.0.3)<br/>10 Gi PVC · 5d retention · 15 UP targets<br/>scrapes all namespaces incl. FastAPI"]
                 GRAF["Grafana<br/>5 Gi PVC · 25+ pre-built dashboards<br/>admin password from vault"]
                 AM["Alertmanager<br/>2 Gi PVC · webhook receiver<br/>(will trigger KFP retraining on drift)"]
-                EVI["Evidently CronJob — PENDING<br/>(hourly drift score: PSI + KS)"]
+                EVI["Evidently drift-check CronJob<br/>(Playbook 12) hourly: PSI + KS-test<br/>fires Alertmanager webhook on drift"]
+                BR["baseline-refresh K8s Job (Playbook 13)<br/>regenerates evidently-baseline ConfigMap<br/>after MLflow alias promotion (~7 sec)<br/>writes to ConfigMap + host disk"]
+                PG["Pushgateway<br/>1 Gi PVC<br/>drift metrics from Evidently"]
+                EVI --> PROM
+                AM --> KFP
             end
         end
 
@@ -116,7 +120,7 @@ flowchart TB
 
 5. **kubeflow namespace**: Kubeflow Pipelines Standalone — pipeline orchestration only. Notebooks, Katib, KServe, Dex, Istio are deliberately omitted; they would consume ~4 GB extra RAM and add no thesis value. Replaced by VSCode Remote-SSH (notebooks), Optuna (HP search), and FastAPI (serving).
 
-6. **monitoring namespace**: Prometheus scrapes pod metrics across all namespaces (currently 15 UP scrape targets including FastAPI via ServiceMonitor); Grafana visualizes them through 25+ pre-built Kubernetes dashboards. Alertmanager fires webhooks on threshold breach — once the Evidently CronJob is added, this becomes the trigger for the closed-loop retraining cycle.
+6. **monitoring namespace**: Prometheus scrapes pod metrics across all namespaces (currently 15+ UP scrape targets including FastAPI via ServiceMonitor); Grafana visualizes them through 25+ pre-built Kubernetes dashboards. Evidently `drift-check` CronJob runs hourly, computing PSI and KS-test statistics from the production prediction histogram against the training baseline, pushing results to Pushgateway, and firing an Alertmanager webhook when drift exceeds the threshold (PSI ≥ 0.2). The `baseline-refresh` Kubernetes Job (Playbook 13) keeps the baseline ConfigMap synchronized with the current MLflow `@production` alias: after model promotion, it runs inference on training data, regenerates the baseline distribution, and writes to both the cluster ConfigMap and host disk in ~7 seconds. Alertmanager fires webhooks on threshold breach — in Adım 4 this becomes the trigger for the fully automated closed-loop retraining cycle.
 
 7. **Dev environment & DVC**: A Python 3.12 virtual environment with DVC, MLflow, PyTorch (CPU), Evidently, and Optuna. The C-MAPSS dataset is versioned by DVC — the 13 `.txt` files (~17 MB) live in MinIO bucket `thesis-data/dvc/`, while only a 300-byte metadata pointer (`cmapss.dvc`) is committed to Git. Reproducing the exact dataset used by any commit is a two-step recipe: `git checkout <hash>` then `dvc pull`.
 
@@ -134,31 +138,57 @@ flowchart TB
 
 ```mermaid
 flowchart TD
-    A[FastAPI /predict] --> B[Prometheus log]
-    C[Training data baseline] --> D
-    B --> D[Evidently CronJob hourly]
-    D --> E[PSI + KS drift score]
-    E --> F{Threshold exceeded?}
+    A[FastAPI /predict] --> B[Prometheus prediction histogram]
+    C[Training-data baseline ConfigMap] --> D
+    B --> D[Evidently drift-check CronJob hourly]
+    D --> E[PSI + KS-test drift score]
+    E --> F{PSI exceeds 0.2?}
     F -- No --> G[Continue monitoring]
     F -- Yes --> H[Alertmanager webhook]
-    H --> I[KFP retraining pipeline]
-    I --> J[MLflow: new model to Staging]
-    J --> K[Champion vs Challenger eval]
-    K --> L{5% better or more?}
-    L -- No --> M[Reject, keep current model]
-    L -- Yes --> N[MLflow: model to Production]
-    N --> O[FastAPI rolling restart, new model live]
+    H --> I[KFP retraining pipeline - Adim 4]
+    I --> J[MLflow: new model version + @production alias swap]
+    J --> P[Notebook 03 Cell 10 / KFP equivalent]
+    P --> Q[baseline-refresh Job]
+    P --> R[FastAPI rolling restart]
+    Q --> S[ConfigMap + disk synced ~7 sec]
+    R --> T[Pod reloads new @production model ~25 sec]
+    S --> O[New baseline + new model serving traffic]
+    T --> O
 
     classDef trigger fill:#fff3cd,stroke:#ffc107
     classDef action fill:#d4edda,stroke:#28a745
     classDef decision fill:#cce5ff,stroke:#0066cc
+    classDef sync fill:#e2e3f3,stroke:#5a5fcf
 
     class D,E trigger
-    class I,J,N,O action
-    class F,K,L decision
+    class I,J,Q,R,O action
+    class F decision
+    class P,S,T sync
 ```
 
-**Measured metric:** `drift-to-recovery latency` — wall-clock time from drift detection to the new model serving traffic.
+**Measured metric:** `drift-to-recovery latency` — wall-clock time from drift detection (T1) to the new model serving traffic (T4 or T5).
+
+### Adım 3 Results (measured 2026-05-24, Notebook 04 fresh run)
+
+| Phase | Duration | Type |
+|---|---|---|
+| T0 → T1 (detection lag) | 2.29 min | system |
+| T1 → T2 (trigger lag) | 0.00 min | manual (Adım 4: ~0 sec via webhook) |
+| T2 → T_RT (retraining) | 3.13 min | system |
+| T_RT → T4 (pod rollout) | 0.41 min | system |
+| T4 → T5 (verification loop) | 7.11 min | experiment overhead |
+
+**Core system recovery (T4 − T1): 3.54 min** ← thesis primary result
+**Total cycle (T5 − T0): 12.94 min**
+**PSI improvement: 8.80 → 0.12 (72× reduction)**
+
+Host: Hetzner CCX23 (16 GB RAM, CPU-only k3s). Model trained on FD001
+(C-MAPSS engine subset 1), drift simulated by injecting 100 predictions
+from FD002 (different operating regimes), recovered by sending 300
+normal FD001-distributed predictions over three iterations. The
+`baseline-refresh` Kubernetes Job and the FastAPI rolling restart are
+chained in Notebook 03 Cell 10 — the same three-step sequence will run
+as KFP pipeline components in Adım 4.
 
 ---
 
@@ -169,6 +199,7 @@ thesis-infra/
 ├── ansible.cfg                 # Ansible global config
 ├── requirements.yml            # Galaxy collections
 ├── README.md                   # This file
+├── ENGINEERING_CHALLENGES.md   # Bug + design dead-end log (EC#1-18)
 ├── LICENSE                     # MIT
 │
 ├── inventory/
@@ -178,45 +209,84 @@ thesis-infra/
 │       └── vault.yml           # AES256-encrypted secrets
 │
 ├── playbooks/
-│   ├── 01-system-prep.yml      # kernel, swap, sysctl, firewall    [done]
-│   ├── 02-k3s.yml              # Kubernetes                         [done]
-│   ├── 03-helm-tools.yml       # Helm, kustomize, krew              [done]
-│   ├── 04-minio.yml            # S3-compatible object storage       [done]
-│   ├── 05-postgres.yml         # MLflow / KFP metadata DB           [done]
-│   ├── 06-kfp-standalone.yml   # Kubeflow Pipelines                 [done]
-│   ├── 07-mlflow.yml           # Experiment tracking + Registry     [done]
-│   ├── 08-monitoring.yml       # Prometheus + Grafana + Alertmanager [done]
-│   ├── 09-fastapi.yml          # Inference REST endpoint            [done]
-│   └── 10-data-and-dev-env.yml # Python venv + C-MAPSS + DVC        [done]
+│   ├── 00-bootstrap-scripts.yml # Render observability scripts       [done]
+│   ├── 01-system-prep.yml       # kernel, swap, sysctl, firewall     [done]
+│   ├── 02-k3s.yml               # Kubernetes                          [done]
+│   ├── 03-helm-tools.yml        # Helm, kustomize, krew               [done]
+│   ├── 04-minio.yml             # S3-compatible object storage        [done]
+│   ├── 05-postgres.yml          # MLflow / KFP metadata DB            [done]
+│   ├── 06-kfp-standalone.yml    # Kubeflow Pipelines                  [done]
+│   ├── 07-mlflow.yml            # Experiment tracking + Registry      [done]
+│   ├── 08-monitoring.yml        # Prometheus + Grafana + Alertmanager [done]
+│   ├── 09-fastapi.yml           # Inference REST endpoint             [done]
+│   ├── 10-data-and-dev-env.yml  # Python venv + C-MAPSS + DVC         [done]
+│   ├── 11-jupyter.yml           # Jupyter Lab dev server (127.0.0.1)  [done]
+│   ├── 12-evidently.yml         # Drift-check CronJob (PSI + KS)      [done]
+│   ├── 13-baseline-refresh.yml  # Baseline ConfigMap sync Job         [done]
+│   └── 14-kfp-retraining.yml    # KFP pipeline + webhook (Adim 4)     [planned]
 │
-├── files/                      # Static configs (Helm values, manifests, app code)
-│   ├── postgres/               # PostgreSQL init SQL
-│   ├── monitoring/             # kube-prometheus-stack values.yaml
-│   ├── data/                   # Python requirements.txt
-│   └── fastapi/                # FastAPI service
-│       ├── Dockerfile          # Multi-stage build, ~200 MB
+├── files/                       # Static configs (Helm values, manifests, app code)
+│   ├── postgres/                # PostgreSQL init SQL
+│   ├── monitoring/              # kube-prometheus-stack values.yaml
+│   ├── data/                    # Python requirements.txt
+│   ├── scripts/                 # Jinja2 templates for shell scripts
+│   │   ├── healthcheck.sh.j2    # 6-layer system health snapshot
+│   │   └── port-forward-all.sh.j2  # Multi-service tunnel manager
+│   ├── fastapi/                 # FastAPI service
+│   │   ├── Dockerfile           # Multi-stage build, ~200 MB
+│   │   ├── app/
+│   │   │   ├── main.py          # FastAPI app (200 lines)
+│   │   │   └── requirements.txt
+│   │   ├── src/                 # LSTMRegressor (referenced by MLflow model)
+│   │   │   ├── model.py
+│   │   │   └── preprocessing.py
+│   │   └── k8s/
+│   │       ├── deployment.yaml
+│   │       ├── service.yaml
+│   │       └── servicemonitor.yaml
+│   ├── evidently/               # Drift detection container (Playbook 12)
+│   │   ├── Dockerfile
+│   │   └── app/
+│   │       ├── drift_check.py   # PSI + KS-test + Pushgateway + Alertmanager
+│   │       └── requirements.txt
+│   └── baseline-refresh/        # Baseline sync container (Playbook 13)
+│       ├── Dockerfile           # Python 3.12 + kubectl + boto3 + torch + mlflow
 │       ├── app/
-│       │   ├── main.py         # FastAPI app (200 lines)
+│       │   ├── refresh.py       # Idempotent baseline regeneration
 │       │   └── requirements.txt
-│       └── k8s/
-│           ├── deployment.yaml
-│           ├── service.yaml
-│           └── servicemonitor.yaml
+│       └── src/                 # Copy of files/fastapi/src (EC#17 fix)
 │
-├── data/                       # Project data (mostly gitignored)
+├── notebooks/                   # Jupyter analysis + thesis experiments
+│   ├── 01_eda_cmapss.ipynb      # Exploratory data analysis (FD001-FD004)
+│   ├── 02_preprocessing.ipynb   # Sequence windowing → X_train.npy
+│   ├── 03_baseline_lstm.ipynb   # LSTM training + MLflow + alias promotion
+│   │                            # + Cell 10 post-promotion sync (3 steps)
+│   └── 04_drift_simulation.ipynb # Drift inject + retrain + measure T0-T5
+│
+├── data/                        # Project data (mostly gitignored)
 │   ├── raw/
-│   │   ├── cmapss/             # 13 C-MAPSS .txt files (gitignored, DVC tracked)
-│   │   └── cmapss.dvc          # DVC metadata pointer (300 bytes, in Git)
-│   └── processed/              # Output of preprocessing (gitignored)
+│   │   ├── cmapss/              # 13 C-MAPSS .txt files (DVC tracked)
+│   │   └── cmapss.dvc           # DVC metadata pointer (300 bytes, in Git)
+│   ├── processed/               # Output of preprocessing (gitignored)
+│   │   ├── X_train.npy          # Training windows (also mirrored to MinIO)
+│   │   └── X_val.npy
+│   └── drift/                   # Notebook 04 experiment outputs (in Git)
+│       ├── baseline.json        # Cluster ConfigMap mirror (single source of truth)
+│       ├── recovery_metrics.json     # T0-T5 timestamps + phase durations
+│       ├── recovery_timeline.png     # Gantt-style timeline plot
+│       └── notebook_04_summary.txt   # Defense-ready summary
 │
 ├── .dvc/                       # DVC configuration
 │   ├── config                  # MinIO remote definition
 │   └── .gitignore              # Cache exclusion (auto-generated)
 ├── .dvcignore                  # DVC scan exclusion list
 │
-├── scripts/                    # Helper bash scripts
-│   ├── healthcheck.sh          # Fast cluster health snapshot
-│   └── port-forward-all.sh     # Open all UIs to laptop
+├── scripts/                     # Helper bash scripts
+│   └── observability/           # Unified monitoring tools
+│       ├── healthcheck.sh       # 6-layer health snapshot (infra/storage/
+│       │                        # resources/ports/services/model)
+│       ├── port-forward-all.sh  # 9-service tunnel manager
+│       └── README.md            # Usage + recovery procedures
 │
 ├── tests/                      # Hierarchical test suite (35+ assertions)
 │   ├── README.md               # Testing strategy + design principles
@@ -228,9 +298,26 @@ thesis-infra/
 │   │                           # Grafana/Alertmanager/DVC/FastAPI tests
 │   └── 99-integration/         # End-to-end scenarios (planned)
 │
-└── docs/                       # Operational documentation
-    └── FIRST_LOOK.md           # Quick-reference for daily use
+└── docs/                        # Operational documentation
+    └── FIRST_LOOK.md            # Quick-reference for daily use
 ```
+
+---
+
+## Engineering Challenges
+
+A growing log of non-trivial bugs and design dead-ends encountered while
+building this system — see **[ENGINEERING_CHALLENGES.md](./ENGINEERING_CHALLENGES.md)**.
+
+Currently 18 entries (EC#1–EC#18). EC#1–13 are documented in their
+resolving commit messages (`git log --grep="EC#"`); EC#14–18 are
+documented in detail in `ENGINEERING_CHALLENGES.md` with symptom, root
+cause, fix, and design notes.
+
+The documentation pattern itself is a thesis contribution — "what could
+go wrong, and how was it discovered" is as important as the architecture.
+
+---
 
 ## License
 
