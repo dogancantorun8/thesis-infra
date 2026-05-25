@@ -1,0 +1,196 @@
+{
+  "experiment": {
+    "name": "drift_recovery_latency_multi_run_validation",
+    "purpose": "Statistical validation of single-run measurement in Adim 3",
+    "executed_at": "2026-05-25T13:22:50.565800+00:00",
+    "host": "Hetzner CCX23 (16GB RAM, CPU-only k3s)",
+    "n_runs": 3,
+    "notebook": "notebooks/04_statistical_validation.ipynb",
+    "underlying_experiment": "notebooks/04_drift_simulation.ipynb"
+  },
+  "aggregated_results": {
+    "n_runs": 3,
+    "recovery_metrics": {
+      "core_system_recovery_min": {
+        "metric": "Core system recovery (T4-T1)",
+        "n": 3,
+        "values": [
+          4.15415185,
+          4.041463133333333,
+          4.01943695
+        ],
+        "mean": 4.0717,
+        "std": 0.0723,
+        "ci_95_lower": 3.9899,
+        "ci_95_upper": 4.1535
+      },
+      "retraining_plus_rollout_min": {
+        "metric": "Retraining + rollout (T4-T2)",
+        "n": 3,
+        "values": [
+          4.152383016666667,
+          4.039626,
+          4.017662116666667
+        ],
+        "mean": 4.0699,
+        "std": 0.0723,
+        "ci_95_lower": 3.9881,
+        "ci_95_upper": 4.1517
+      },
+      "full_cycle_min": {
+        "metric": "Full cycle (T5-T0)",
+        "n": 3,
+        "values": [
+          13.598921933333333,
+          11.234789866666667,
+          11.123745283333333
+        ],
+        "mean": 11.9858,
+        "std": 1.3981,
+        "ci_95_lower": 10.4037,
+        "ci_95_upper": 13.5679
+      },
+      "total_measured_min": {
+        "metric": "Total measured (T5-T1)",
+        "n": 3,
+        "values": [
+          11.298141016666667,
+          8.925374383333333,
+          8.832054066666666
+        ],
+        "mean": 9.6852,
+        "std": 1.3976,
+        "ci_95_lower": 8.1036,
+        "ci_95_upper": 11.2668
+      }
+    },
+    "phase_durations_min": {
+      "detection_lag": {
+        "metric": "Detection lag (T0\u2192T1)",
+        "n": 3,
+        "values": [
+          2.3007809166666666,
+          2.3094154833333334,
+          2.2916912166666665
+        ],
+        "mean": 2.3006,
+        "std": 0.0089,
+        "ci_95_lower": 2.2906,
+        "ci_95_upper": 2.3107
+      },
+      "trigger_lag": {
+        "metric": "Trigger lag (T1\u2192T2)",
+        "n": 3,
+        "values": [
+          0.0017688333333333334,
+          0.0018371333333333335,
+          0.0017748333333333333
+        ],
+        "mean": 0.0018,
+        "std": 0.0,
+        "ci_95_lower": 0.0018,
+        "ci_95_upper": 0.0018
+      },
+      "retraining": {
+        "metric": "Retraining (T2\u2192T_RT)",
+        "n": 3,
+        "values": [
+          3.7332313333333333,
+          3.6193088333333336,
+          3.5968517
+        ],
+        "mean": 3.6498,
+        "std": 0.0731,
+        "ci_95_lower": 3.5671,
+        "ci_95_upper": 3.7325
+      },
+      "pod_rollout": {
+        "metric": "Pod rollout (T_RT\u2192T4)",
+        "n": 3,
+        "values": [
+          0.41915168333333336,
+          0.4203171666666667,
+          0.4208104166666667
+        ],
+        "mean": 0.4201,
+        "std": 0.0009,
+        "ci_95_lower": 0.4191,
+        "ci_95_upper": 0.4211
+      },
+      "verification": {
+        "metric": "Verification (T4\u2192T5)",
+        "n": 3,
+        "values": [
+          7.143989166666667,
+          4.88391125,
+          4.812617116666667
+        ],
+        "mean": 5.6135,
+        "std": 1.3259,
+        "ci_95_lower": 4.1131,
+        "ci_95_upper": 7.1139
+      }
+    },
+    "drift_signal": {
+      "psi_at_T1": {
+        "metric": "PSI at T1 (drift detected)",
+        "n": 3,
+        "values": [
+          8.8018,
+          8.8018,
+          8.8018
+        ],
+        "mean": 8.8018,
+        "std": 0.0,
+        "ci_95_lower": 8.8018,
+        "ci_95_upper": 8.8018
+      },
+      "psi_at_T5": {
+        "metric": "PSI at T5 (recovered)",
+        "n": 3,
+        "values": [
+          0.123,
+          0.1614,
+          0.1845
+        ],
+        "mean": 0.1563,
+        "std": 0.0311,
+        "ci_95_lower": 0.1211,
+        "ci_95_upper": 0.1915
+      },
+      "improvement_factor": {
+        "metric": "Improvement factor",
+        "n": 3,
+        "values": [
+          71.55934959349594,
+          54.53407682775713,
+          47.706233062330625
+        ],
+        "mean": 57.9332,
+        "std": 12.2845,
+        "ci_95_lower": 44.032,
+        "ci_95_upper": 71.8344
+      }
+    }
+  },
+  "per_run_summaries": [
+    {
+      "run_id": 1,
+      "core_recovery_min": 4.15415185,
+      "executed_at": "2026-05-25T12:04:56.124246+00:00",
+      "model_version_after": "20"
+    },
+    {
+      "run_id": 2,
+      "core_recovery_min": 4.041463133333333,
+      "executed_at": "2026-05-25T12:21:23.838994+00:00",
+      "model_version_after": "22"
+    },
+    {
+      "run_id": 3,
+      "core_recovery_min": 4.01943695,
+      "executed_at": "2026-05-25T12:37:44.607233+00:00",
+      "model_version_after": "24"
+    }
+  ]
+}

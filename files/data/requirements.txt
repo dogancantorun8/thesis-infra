@@ -12,6 +12,9 @@ numpy>=1.26,<2.0
 pandas>=2.2,<3.0
 scikit-learn>=1.5,<2.0
 
+# --- Gradient boosting (Notebook 05 model comparison) ---
+xgboost>=2.0,<3.0
+
 # --- Deep learning ---
 torch>=2.3,<3.0
 pytorch-lightning>=2.3,<3.0
@@ -31,6 +34,9 @@ ipykernel>=6.29,<7.0
 matplotlib>=3.9,<4.0
 seaborn>=0.13,<0.14
 plotly>=5.22,<6.0
+
+# --- HTTP client (Notebook 04 drift simulation, healthcheck calls) ---
+requests>=2.32,<3.0
 
 # --- Utilities ---
 pyyaml>=6.0,<7.0

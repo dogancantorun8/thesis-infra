@@ -1,0 +1,143 @@
+{
+  "experiment": {
+    "name": "model_comparison_for_rul_prediction",
+    "purpose": "Justify LSTM choice via empirical comparison of 7 architectures",
+    "executed_at": "2026-05-25T13:40:57.058662+00:00",
+    "host": "Hetzner CCX23 (16GB RAM, CPU-only k3s)",
+    "dataset": "C-MAPSS FD001",
+    "n_train": 14459,
+    "n_val": 3272,
+    "window_size": 30,
+    "n_sensors": 16,
+    "random_seed": 42,
+    "notebook": "notebooks/05_model_comparison.ipynb"
+  },
+  "training_regime": {
+    "rnn_models": {
+      "target_normalization": "MinMax to [0, 1]",
+      "gradient_clipping": "max_norm=1.0",
+      "optimizer": "Adam",
+      "initial_lr": 0.001,
+      "lr_scheduler": "ReduceLROnPlateau (factor=0.5, patience=5)",
+      "max_epochs": 50,
+      "early_stopping_patience": 10,
+      "batch_size": 64
+    },
+    "cnn_model": {
+      "target_normalization": "none (BatchNorm handles internally)",
+      "early_stopping_patience": 10,
+      "max_epochs": 40
+    },
+    "tree_models": {
+      "linear_regression": "sklearn default",
+      "random_forest": "n_estimators=100",
+      "xgboost": "n_estimators=300, max_depth=6, n_jobs=2"
+    }
+  },
+  "results": {
+    "linear": {
+      "model_name": "Linear Regression",
+      "rmse": 17.8928,
+      "mae": 14.6917,
+      "r2": 0.8132,
+      "train_time_sec": 0.17,
+      "inference_ms_per_sample": 0.0442,
+      "param_count": 481,
+      "n_train": 14459,
+      "n_val": 3272
+    },
+    "random_forest": {
+      "model_name": "Random Forest",
+      "rmse": 17.425,
+      "mae": 12.8653,
+      "r2": 0.8229,
+      "train_time_sec": 130.78,
+      "inference_ms_per_sample": 0.2223,
+      "param_count": null,
+      "n_train": 14459,
+      "n_val": 3272
+    },
+    "xgboost": {
+      "model_name": "XGBoost",
+      "rmse": 15.373,
+      "mae": 11.3356,
+      "r2": 0.8621,
+      "train_time_sec": 10.71,
+      "inference_ms_per_sample": 0.0066,
+      "param_count": null,
+      "n_train": 14459,
+      "n_val": 3272
+    },
+    "cnn": {
+      "model_name": "1D-CNN",
+      "rmse": 18.6987,
+      "mae": 14.3762,
+      "r2": 0.796,
+      "train_time_sec": 27.81,
+      "inference_ms_per_sample": 0.0172,
+      "param_count": 8849,
+      "n_train": 14459,
+      "n_val": 3272
+    },
+    "gru": {
+      "model_name": "GRU",
+      "rmse": 12.7003,
+      "mae": 8.853,
+      "r2": 0.9059,
+      "train_time_sec": 58.46,
+      "inference_ms_per_sample": 0.044,
+      "param_count": 40769,
+      "n_train": 14459,
+      "n_val": 3272
+    },
+    "lstm": {
+      "model_name": "LSTM",
+      "rmse": 13.2169,
+      "mae": 9.4219,
+      "r2": 0.8981,
+      "train_time_sec": 34.18,
+      "inference_ms_per_sample": 0.1302,
+      "param_count": 54337,
+      "n_train": 14459,
+      "n_val": 3272
+    },
+    "transformer": {
+      "model_name": "Transformer",
+      "rmse": 13.099,
+      "mae": 9.3181,
+      "r2": 0.8999,
+      "train_time_sec": 88.81,
+      "inference_ms_per_sample": 0.0579,
+      "param_count": 70017,
+      "n_train": 14459,
+      "n_val": 3272
+    }
+  },
+  "rankings": {
+    "by_rmse": [
+      "GRU",
+      "Transformer",
+      "LSTM",
+      "XGBoost",
+      "Random Forest",
+      "Linear Regression",
+      "1D-CNN"
+    ],
+    "by_inference_speed": [
+      "XGBoost",
+      "1D-CNN",
+      "GRU",
+      "Linear Regression",
+      "Transformer",
+      "LSTM",
+      "Random Forest"
+    ],
+    "by_parameter_efficiency": [
+      "Linear Regression",
+      "1D-CNN",
+      "GRU",
+      "LSTM",
+      "Transformer"
+    ]
+  }
+}

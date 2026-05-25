@@ -3,47 +3,47 @@
     "name": "drift_simulation_recovery_latency",
     "notebook": "notebooks/04_drift_simulation.ipynb",
     "thesis_step": "Adim 3",
-    "executed_at": "2026-05-25T12:37:44.607233+00:00",
+    "executed_at": "2026-05-25T12:04:56.124246+00:00",
     "host": "Hetzner CCX23 (16GB RAM, CPU-only k3s)"
   },
   "timestamps": {
-    "T0_drift_injection_start": "2026-05-25T12:26:36.673195+00:00",
-    "T1_drift_detected": "2026-05-25T12:28:54.174668+00:00",
-    "T2_retraining_start": "2026-05-25T12:28:54.281158+00:00",
-    "T_retrain_done": "2026-05-25T12:32:30.092260+00:00",
-    "T4_pod_restarted": "2026-05-25T12:32:55.340885+00:00",
-    "T5_recovery_confirmed": "2026-05-25T12:37:44.097912+00:00"
+    "T0_drift_injection_start": "2026-05-25T11:51:19.708292+00:00",
+    "T1_drift_detected": "2026-05-25T11:53:37.755147+00:00",
+    "T2_retraining_start": "2026-05-25T11:53:37.861277+00:00",
+    "T_retrain_done": "2026-05-25T11:57:21.855157+00:00",
+    "T4_pod_restarted": "2026-05-25T11:57:47.004258+00:00",
+    "T5_recovery_confirmed": "2026-05-25T12:04:55.643608+00:00"
   },
   "phase_durations_sec": {
-    "detection_lag": 137.501473,
-    "trigger_lag": 0.10649,
-    "retraining": 215.811102,
-    "pod_rollout": 25.248625,
-    "verification": 288.757027
+    "detection_lag": 138.046855,
+    "trigger_lag": 0.10613,
+    "retraining": 223.99388,
+    "pod_rollout": 25.149101,
+    "verification": 428.63935
   },
   "phase_durations_min": {
-    "detection_lag": 2.2916912166666665,
-    "trigger_lag": 0.0017748333333333333,
-    "retraining": 3.5968517,
-    "pod_rollout": 0.4208104166666667,
-    "verification": 4.812617116666667
+    "detection_lag": 2.3007809166666666,
+    "trigger_lag": 0.0017688333333333334,
+    "retraining": 3.7332313333333333,
+    "pod_rollout": 0.41915168333333336,
+    "verification": 7.143989166666667
   },
   "recovery_metrics": {
-    "core_system_recovery_min": 4.01943695,
-    "retraining_plus_rollout_min": 4.017662116666667,
-    "total_measured_min": 8.832054066666666,
-    "full_cycle_min": 11.123745283333333,
-    "projected_adim4_min": 4.017662116666667
+    "core_system_recovery_min": 4.15415185,
+    "retraining_plus_rollout_min": 4.152383016666667,
+    "total_measured_min": 11.298141016666667,
+    "full_cycle_min": 13.598921933333333,
+    "projected_adim4_min": 4.152383016666667
   },
   "drift_signal": {
     "psi_at_T1_drift_detected": 8.8018,
-    "psi_at_T5_recovered": 0.1845,
+    "psi_at_T5_recovered": 0.123,
     "psi_threshold": 0.2,
-    "improvement_factor": 47.706233062330625
+    "improvement_factor": 71.55934959349594
   },
   "model_versions": {
     "at_T1_pre_drift": "6",
-    "at_T5_post_retrain": "24"
+    "at_T5_post_retrain": "20"
   },
   "drift_injection": {
     "source_dataset": "FD002 test (different operating conditions)",
@@ -56,18 +56,26 @@
     {
       "attempt": 1,
       "total_normal_sent": 100,
-      "psi": 0.2132,
-      "ks_pvalue": 0.4305,
+      "psi": 0.4667,
+      "ks_pvalue": 0.3775,
       "drift_detected": "True",
-      "timestamp": "2026-05-25T12:35:26.297626+00:00"
+      "timestamp": "2026-05-25T12:00:18.191814+00:00"
     },
     {
       "attempt": 2,
       "total_normal_sent": 200,
-      "psi": 0.1845,
-      "ks_pvalue": 0.5291,
+      "psi": 0.2076,
+      "ks_pvalue": 0.7959,
+      "drift_detected": "True",
+      "timestamp": "2026-05-25T12:02:37.036993+00:00"
+    },
+    {
+      "attempt": 3,
+      "total_normal_sent": 300,
+      "psi": 0.123,
+      "ks_pvalue": 0.9073,
       "drift_detected": "False",
-      "timestamp": "2026-05-25T12:37:44.097912+00:00"
+      "timestamp": "2026-05-25T12:04:55.643608+00:00"
     }
   ],
   "known_issues": {
