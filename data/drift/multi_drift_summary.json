@@ -1,0 +1,240 @@
+{
+  "experiment": {
+    "name": "multi_drift_recovery_latency",
+    "purpose": "Test if recovery time depends on drift severity",
+    "executed_at": "2026-06-03T21:56:14.904880+00:00",
+    "host": "Hetzner CCX23 (16GB RAM, CPU-only k3s)",
+    "n_scenarios": 4,
+    "n_runs_per_scenario": 2,
+    "notebook": "notebooks/07_multi_drift_experiments.ipynb",
+    "underlying_experiment": "notebooks/04_drift_simulation.ipynb"
+  },
+  "scenarios": [
+    {
+      "name": "mild",
+      "source_file": "test_FD001.txt",
+      "description": "Same regime + same fault as training (FD001 test split)",
+      "regimes": 1,
+      "fault_modes": 1,
+      "expected_psi_range": "0.5 - 2.0 (may exceed due to end-of-life)",
+      "scenario_meta": {
+        "name": "mild",
+        "source_file": "test_FD001.txt",
+        "description": "Same regime + same fault as training (FD001 test split)",
+        "regimes": 1,
+        "fault_modes": 1,
+        "expected_psi_range": "0.5 - 2.0 (may exceed due to end-of-life)"
+      },
+      "n_runs": 2,
+      "recovery_time_min": {
+        "metric": "T4-T1",
+        "n": 2,
+        "values": [
+          3.9317099166666667,
+          3.4900082
+        ],
+        "mean": 3.7109,
+        "std": 0.3123,
+        "ci_95_lower": 3.278,
+        "ci_95_upper": 4.1437
+      },
+      "psi_at_T1": {
+        "metric": "PSI@T1",
+        "n": 2,
+        "values": [
+          0.2893,
+          0.1977
+        ],
+        "mean": 0.2435,
+        "std": 0.0648,
+        "ci_95_lower": 0.1537,
+        "ci_95_upper": 0.3333
+      },
+      "psi_at_T5": {
+        "metric": "PSI@T5",
+        "n": 2,
+        "values": [
+          0.1929,
+          0.1708
+        ],
+        "mean": 0.1819,
+        "std": 0.0156,
+        "ci_95_lower": 0.1602,
+        "ci_95_upper": 0.2035
+      }
+    },
+    {
+      "name": "medium",
+      "source_file": "test_FD003.txt",
+      "description": "Same regime, NEW fault mode (HPC + Fan)",
+      "regimes": 1,
+      "fault_modes": 2,
+      "expected_psi_range": "2.0 - 5.0",
+      "scenario_meta": {
+        "name": "medium",
+        "source_file": "test_FD003.txt",
+        "description": "Same regime, NEW fault mode (HPC + Fan)",
+        "regimes": 1,
+        "fault_modes": 2,
+        "expected_psi_range": "2.0 - 5.0"
+      },
+      "n_runs": 2,
+      "recovery_time_min": {
+        "metric": "T4-T1",
+        "n": 2,
+        "values": [
+          3.8744708500000002,
+          4.196215316666667
+        ],
+        "mean": 4.0353,
+        "std": 0.2275,
+        "ci_95_lower": 3.72,
+        "ci_95_upper": 4.3507
+      },
+      "psi_at_T1": {
+        "metric": "PSI@T1",
+        "n": 2,
+        "values": [
+          0.2333,
+          0.2329
+        ],
+        "mean": 0.2331,
+        "std": 0.0003,
+        "ci_95_lower": 0.2327,
+        "ci_95_upper": 0.2335
+      },
+      "psi_at_T5": {
+        "metric": "PSI@T5",
+        "n": 2,
+        "values": [
+          0.1763,
+          0.1701
+        ],
+        "mean": 0.1732,
+        "std": 0.0044,
+        "ci_95_lower": 0.1671,
+        "ci_95_upper": 0.1793
+      }
+    },
+    {
+      "name": "severe",
+      "source_file": "test_FD002.txt",
+      "description": "NEW regimes (6), same fault mode",
+      "regimes": 6,
+      "fault_modes": 1,
+      "expected_psi_range": "8.0 - 10.0",
+      "scenario_meta": {
+        "name": "severe",
+        "source_file": "test_FD002.txt",
+        "description": "NEW regimes (6), same fault mode",
+        "regimes": 6,
+        "fault_modes": 1,
+        "expected_psi_range": "8.0 - 10.0"
+      },
+      "n_runs": 2,
+      "recovery_time_min": {
+        "metric": "T4-T1",
+        "n": 2,
+        "values": [
+          3.8873908,
+          3.9271771
+        ],
+        "mean": 3.9073,
+        "std": 0.0281,
+        "ci_95_lower": 3.8683,
+        "ci_95_upper": 3.9463
+      },
+      "psi_at_T1": {
+        "metric": "PSI@T1",
+        "n": 2,
+        "values": [
+          0.1345,
+          0.094
+        ],
+        "mean": 0.1143,
+        "std": 0.0286,
+        "ci_95_lower": 0.0746,
+        "ci_95_upper": 0.1539
+      },
+      "psi_at_T5": {
+        "metric": "PSI@T5",
+        "n": 2,
+        "values": [
+          0.0867,
+          0.087
+        ],
+        "mean": 0.0868,
+        "std": 0.0002,
+        "ci_95_lower": 0.0866,
+        "ci_95_upper": 0.0871
+      }
+    },
+    {
+      "name": "extreme",
+      "source_file": "test_FD004.txt",
+      "description": "NEW regimes + NEW fault mode",
+      "regimes": 6,
+      "fault_modes": 2,
+      "expected_psi_range": "10.0+",
+      "scenario_meta": {
+        "name": "extreme",
+        "source_file": "test_FD004.txt",
+        "description": "NEW regimes + NEW fault mode",
+        "regimes": 6,
+        "fault_modes": 2,
+        "expected_psi_range": "10.0+"
+      },
+      "n_runs": 2,
+      "recovery_time_min": {
+        "metric": "T4-T1",
+        "n": 2,
+        "values": [
+          3.9348019166666663,
+          3.9941816500000002
+        ],
+        "mean": 3.9645,
+        "std": 0.042,
+        "ci_95_lower": 3.9063,
+        "ci_95_upper": 4.0227
+      },
+      "psi_at_T1": {
+        "metric": "PSI@T1",
+        "n": 2,
+        "values": [
+          0.1168,
+          0.1961
+        ],
+        "mean": 0.1565,
+        "std": 0.0561,
+        "ci_95_lower": 0.0787,
+        "ci_95_upper": 0.2342
+      },
+      "psi_at_T5": {
+        "metric": "PSI@T5",
+        "n": 2,
+        "values": [
+          0.1285,
+          0.181
+        ],
+        "mean": 0.1547,
+        "std": 0.0371,
+        "ci_95_lower": 0.1033,
+        "ci_95_upper": 0.2062
+      }
+    }
+  ],
+  "anova": {
+    "test": "one-way ANOVA",
+    "groups": [
+      "mild",
+      "medium",
+      "severe",
+      "extreme"
+    ],
+    "f_statistic": 1.0223767871961047,
+    "p_value": 0.47134685492786443,
+    "alpha": 0.05,
+    "reject_h0": false,
+    "conclusion": "Recovery is infrastructure-bound (severity-independent)"
+  }
+}

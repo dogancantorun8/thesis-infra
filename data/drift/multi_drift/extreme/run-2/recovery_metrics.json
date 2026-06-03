@@ -39,7 +39,9 @@
     "psi_at_T1_drift_detected": 0.1961,
     "psi_at_T5_recovered": 0.181,
     "psi_threshold": 0.2,
-    "improvement_factor": 1.083425414364641
+    "improvement_factor": 1.083425414364641,
+    "drift_detected_by_psi_ks": false,
+    "ks_p_value_at_T1": 0.9866
   },
   "model_versions": {
     "at_T1_pre_drift": "6",
@@ -50,7 +52,9 @@
     "normalization": "FD001 train min/max ranges",
     "n_predictions": 100,
     "rate_limit_sec": 1.0,
-    "out_of_range_fraction": 0.803
+    "out_of_range_fraction": 0.8108,
+    "out_of_range_cells": 534662,
+    "total_cells": 659424
   },
   "recovery_curve": [
     {

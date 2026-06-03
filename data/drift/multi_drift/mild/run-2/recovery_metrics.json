@@ -1,0 +1,81 @@
+{
+  "experiment": {
+    "name": "drift_simulation_recovery_latency",
+    "notebook": "notebooks/04_drift_simulation.ipynb",
+    "thesis_step": "Adim 3",
+    "executed_at": "2026-06-03T20:36:25.136980+00:00",
+    "host": "Hetzner CCX23 (16GB RAM, CPU-only k3s)"
+  },
+  "timestamps": {
+    "T0_drift_injection_start": "2026-06-03T20:28:06.920092+00:00",
+    "T1_drift_detected": "2026-06-03T20:30:24.735848+00:00",
+    "T2_retraining_start": "2026-06-03T20:30:24.841712+00:00",
+    "T_retrain_done": "2026-06-03T20:33:29.846409+00:00",
+    "T4_pod_restarted": "2026-06-03T20:33:54.136340+00:00",
+    "T5_recovery_confirmed": "2026-06-03T20:36:24.697431+00:00"
+  },
+  "phase_durations_sec": {
+    "detection_lag": 137.815756,
+    "trigger_lag": 0.105864,
+    "retraining": 185.004697,
+    "pod_rollout": 24.289931,
+    "verification": 150.561091
+  },
+  "phase_durations_min": {
+    "detection_lag": 2.2969292666666665,
+    "trigger_lag": 0.0017644,
+    "retraining": 3.0834116166666665,
+    "pod_rollout": 0.4048321833333333,
+    "verification": 2.509351516666667
+  },
+  "recovery_metrics": {
+    "core_system_recovery_min": 3.4900082,
+    "retraining_plus_rollout_min": 3.4882438,
+    "total_measured_min": 5.999359716666667,
+    "full_cycle_min": 8.296288983333334,
+    "projected_adim4_min": 3.4882438
+  },
+  "drift_signal": {
+    "psi_at_T1_drift_detected": 0.1977,
+    "psi_at_T5_recovered": 0.1708,
+    "psi_threshold": 0.2,
+    "improvement_factor": 1.157494145199063,
+    "drift_detected_by_psi_ks": false,
+    "ks_p_value_at_T1": 0.2242
+  },
+  "model_versions": {
+    "at_T1_pre_drift": "6",
+    "at_T5_post_retrain": "44"
+  },
+  "drift_injection": {
+    "source_dataset": "FD001 test (different operating conditions)",
+    "normalization": "FD001 train min/max ranges",
+    "n_predictions": 100,
+    "rate_limit_sec": 1.0,
+    "out_of_range_fraction": 0.0001,
+    "out_of_range_cells": 18,
+    "total_cells": 209536
+  },
+  "recovery_curve": [
+    {
+      "attempt": 1,
+      "total_normal_sent": 100,
+      "psi": 0.1708,
+      "ks_pvalue": 0.2615,
+      "drift_detected": "False",
+      "timestamp": "2026-06-03T20:36:24.697431+00:00"
+    }
+  ],
+  "known_issues": {
+    "ks_test_histogram_bias": {
+      "description": "drift_check.py reconstructs samples from histogram midpoints, producing discrete distributions. KS-test p-value stays at 0.0 regardless of true distribution similarity.",
+      "impact": "Recovery criterion uses PSI only (not OR-with-KS).",
+      "status": "Documented as Engineering Challenge 16, to be fixed."
+    },
+    "manual_trigger_workflow": {
+      "description": "Cell 6 manually triggers drift-check (skips hourly CronJob wait). Cell 7 manually invokes Notebook 03.",
+      "impact": "Trigger lag (15.85 min) reflects manual workflow, not system capability.",
+      "status": "Adim 4 will eliminate via Alertmanager -> KFP webhook."
+    }
+  }
+}
