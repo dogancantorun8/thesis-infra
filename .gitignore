@@ -32,3 +32,14 @@ inventory/group_vars/vault.yml
 *.pyc
 *.pyo
 
+
+# === Backup files from in-place patches (Adim 4 buildout) ===
+*.bak
+*.bak-*
+*.orig
+
+# === Python cache ===
+**/__pycache__/
+*.pyc
+*.pyo
+
