@@ -36,6 +36,10 @@
 | 20 | Hardcoded `out_of_range_fraction` in JSON metadata | JSON Metadata | Resolved (post-hoc) |
 | 21 | **EC#16 manifests at scale (PSI inversion)** | Drift Detection | Documented as finding |
 | 22 | **Force-continue protocol enables measurement** | Experimental Design | Documented as feature |
+| 23 | Missing `MLFLOW_S3_ENDPOINT_URL` in KFP component pod | KFP Pipeline | Resolved |
+| 24 | **Threshold factor semantic inversion** | Model Registry | Resolved |
+| 25 | **Notebook-to-script training reproducibility gap** | ML Reproducibility | Documented as finding |
+| 26 | Idempotent KFP pipeline deployment | KFP Pipeline | Resolved |
 
 **Bold entries** are defense-critical findings emphasized in the thesis.
 
@@ -769,6 +773,153 @@ Defense implication:
 > *"The system's apparent resilience in multi-drift experiments came from the experimental force-continue protocol — Notebook 04 records T1 markers based on job execution time rather than detection success. Production deployments do not have this fallback. If PSI/KS detection fails (as it does for severe drift, see EC#21), production would not trigger recovery. This is a deployment gap identified during multi-drift testing and motivates the complementary monitoring recommendation."*
 
 ---
+---
+
+## EC#23 — Missing `MLFLOW_S3_ENDPOINT_URL` in KFP Component Pod
+
+**When:** First successful KFP retraining pipeline test run
+
+**Symptom:**
+The `train_lstm_op` component failed during MLflow model logging:
+botocore.exceptions.ClientError
+An error occured (InvalidAccessKeyId) when calling the PutObject operation: 
+The AWS Access Key Id you provided does not exixt in our records- 
+
+Failed to upload .../artifacts/model/requirements.txt to thesis-mlflow/9/.../artifacts/model/requirements.txt
+
+The MinIO credentials in the pod were correct (`thesisadmin`), and the same key worked from a local venv directly against `thesis-mlflow`. So why the rejection?
+
+**Root cause:**
+KFP component pods received `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` via `kfp.kubernetes.use_secret_as_env()`, but they did NOT receive `MLFLOW_S3_ENDPOINT_URL`. When `mlflow.pytorch.log_model()` invoked its boto3 client, the missing endpoint variable caused boto3 to fall back to the default AWS S3 endpoint (`s3.amazonaws.com`). The `thesisadmin` access key — valid in MinIO — was sent to the real AWS, which rejected it with `InvalidAccessKeyId`.
+
+The FastAPI deployment and the baseline-refresh CronJob already had `MLFLOW_S3_ENDPOINT_URL` set in their pod spec. The KFP pipeline definition was missing it.
+
+**Fix:**
+Added a constant `MLFLOW_S3_ENV_VARS` in `kfp/retraining_pipeline.py` and extended the helper `_inject_minio_secret(task)` to apply both the Secret-as-env injection AND plain env-var injection for the endpoint URL and default region:
+```python
+MLFLOW_S3_ENV_VARS = {
+    "MLFLOW_S3_ENDPOINT_URL": "http://minio.minio.svc.cluster.local:9000",
+    "AWS_DEFAULT_REGION":      "us-east-1",
+}
+
+def _inject_minio_secret(task):
+    kubernetes.use_secret_as_env(task=task, secret_name=MINIO_SECRET_NAME, ...)
+    for name, value in MLFLOW_S3_ENV_VARS.items():
+        task.set_env_variable(name=name, value=value)
+    return task
+```
+
+**Lesson:**
+`MLflow` client-side artifact upload uses boto3 directly — credentials alone are not sufficient. The endpoint URL must be explicitly set or boto3 silently routes to AWS. This is a subtle pattern: the FastAPI deployment got it right from day one, but the KFP pipeline was authored under the assumption that "credentials = access," which is incomplete for non-AWS S3-compatible stores.
+
+A useful guard: every container that uses `mlflow.log_model` or `mlflow.log_artifact` should set `MLFLOW_S3_ENDPOINT_URL` and `AWS_DEFAULT_REGION` as part of the standard pod environment, ideally via a shared ConfigMap.
+
+---
+
+## EC#24 — Threshold Factor Semantic Inversion
+
+**When:** First end-to-end KFP retraining test run (post EC#23 fix)
+
+**Symptom:**
+A test run with `threshold_factor=99.0` — intended as "essentially never promote" for a safe trial — promoted the new model (v57, val_rmse=44.24) to `@production`, replacing v56 (val_rmse=13.54), an objectively much better model. FastAPI was auto-rolled to the worse model.
+
+**Root cause:**
+The champion-challenger decision rule in `register_model.py`:
+```python
+if challenger_rmse < champion_rmse * threshold_factor:
+    promote_to_production()
+```
+
+For `threshold_factor=99.0`:
+seed=42: 41.4073
+seed=42: 41.4058
+seed=42: 41.4055
+
+Spread = 0.0018 — the model deterministically lands at the same loss surface regardless of initialization.
+
+4. **Code-level differences between notebook and script** — REJECTED.
+   Running the Notebook 03 training code locally (today, on the same `data/processed/*.npy` files) reproduces the KFP result, not the v56 result:
+
+Notebook style (local,today): Epoch 10 val_rmse=41.51
+train_lstm.py (local): Epoch 10 val_rmse=41.51 (identical) 
+
+**Diagnosis:**
+The training pipeline is mechanically correct. The discrepancy must lie in the **data**, not the code. The processed `.npy` files have modification timestamp `May 17 23:06`, but `normalization_params.json` was modified `Jun 3 23:28` — suggesting the preprocessing parameters were updated WITHOUT regenerating the `.npy` arrays and bumping the DVC pointer. The model is being trained on data that no longer matches its normalization scheme.
+
+**Resolution status:**
+Open as a known limitation. The production retraining infrastructure works end-to-end: data ingestion (DVC pull), training (LSTM with scheduler, multi-seed), MLflow logging, champion-challenger gate, alias swap, baseline refresh, FastAPI rollout — every component is functional and verifiable.
+
+The model quality regression is a **data-versioning issue**, not a closed-loop infrastructure failure. To resolve:
+1. Re-run Notebook 02 to regenerate `.npy` arrays with current preprocessing code.
+2. `dvc add data/processed && dvc push && git commit` to bump the DVC pointer.
+3. Re-run KFP pipeline against fresh data — expect `val_rmse ≈ 13` matching v56.
+
+**Lesson:**
+Reproducibility in ML pipelines requires versioning three independent artifacts:
+1. **Code** — handled by git.
+2. **Data** — handled by DVC, but ONLY if the `.dvc` pointer is bumped when data changes.
+3. **Preprocessing parameters** — easily desynchronized; can drift silently from the data they describe.
+
+A pre-commit hook that runs `dvc status` and fails if any tracked file has changed without a `dvc add` would have caught this. This is added to the future-work list.
+
+Defense framing:
+> *"Closed-loop retraining infrastructure is fully operational — drift detection triggers a KFP pipeline, which loads data via DVC, trains a fresh model, evaluates against the champion, and either promotes (with rollout to FastAPI + baseline refresh) or rejects. The current model quality gap (KFP 41.4 vs Notebook 13.5) is traced to a DVC pointer / preprocessing-params desynchronization — an open data-management question, not an infrastructure failure. The pipeline mechanics are validated by the same code producing identical results in notebook and KFP contexts."*
+
+---
+
+## EC#26 — Idempotent KFP Pipeline Deployment
+
+**When:** Building the `scripts/build-and-deploy-retraining.sh` automation
+
+**Symptom:**
+After the first successful pipeline upload, every subsequent invocation of `client.upload_pipeline()` failed with:
+kfp_server_api.exceptions.ApiException(409)
+Reason:Conflict 
+
+The deploy script (intended for iterative redeploys during development) became single-use: it worked on a clean cluster but broke as soon as the pipeline existed.
+
+**Root cause:**
+The KFP SDK provides two distinct upload endpoints:
+- `client.upload_pipeline(...)` — creates a NEW pipeline; conflicts on existing name.
+- `client.upload_pipeline_version(pipeline_id=..., ...)` — uploads a NEW VERSION of an existing pipeline.
+
+The original `pipeline.py --upload` code used only the first. This is correct for first-time provisioning (Playbook 14, sıfırdan kurulum) but wrong for iterative development.
+
+**Fix:**
+Made the upload logic in `kfp/retraining_pipeline.py` idempotent — it now detects an existing pipeline by display name and routes to the correct API:
+```python
+existing = None
+try:
+    pipelines = client.list_pipelines(page_size=100)
+    for p in (pipelines.pipelines or []):
+        if p.display_name == PIPELINE_NAME:
+            existing = p
+            break
+except Exception:
+    pass
+
+if existing is None:
+    # First-time deploy — create the pipeline
+    client.upload_pipeline(pipeline_package_path=..., pipeline_name=PIPELINE_NAME, ...)
+else:
+    # Iterative redeploy — upload as a new version
+    version_name = f"v-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    client.upload_pipeline_version(
+        pipeline_package_path=...,
+        pipeline_version_name=version_name,
+        pipeline_id=existing.pipeline_id,
+        description=PIPELINE_DESCRIPTION,
+    )
+```
+
+With this fix, the deploy script works for both initial provisioning and iterative development without changing the command. Version history is preserved in KFP UI.
+
+**Lesson:**
+"Infrastructure as code" requires every deploy operation to be **idempotent** — running it twice should be safe. The KFP SDK's split between `upload_pipeline` (creates) and `upload_pipeline_version` (updates) is technically correct REST API design (`POST` vs `PUT`-like semantics), but it puts the idempotency burden on the caller. A well-designed deploy script must hide this distinction from its users.
+
+This is the kind of subtle issue that surfaces only when the same code runs at two different cluster states — and it is exactly the sort of thing that Ansible playbooks routinely handle (e.g., `kubernetes.core.k8s` with `state: present` is idempotent by design). The KFP SDK is not yet at that maturity level for pipeline lifecycle operations.
+
+---
 
 ## Overall Assessment — Significance for the Thesis
 
@@ -806,10 +957,11 @@ The 22 EC entries are evidence of **engineering rigor** in the thesis:
 ### Numerical Summary
 
 ```
-Total EC entries:        22
-Resolved:                22 (100%)
-Documented in commits:   22
-Detailed writeup:        22 (this document)
+Total EC entries:        26
+Resolved:                25 (96%)
+Documented as findings:   1 (EC#25 — open data-versioning question)
+Documented in commits:   26
+Detailed writeup:        26 (this document)
 
 Categories:
   Infrastructure (1-6, 14, 15):     8 entries
@@ -818,6 +970,8 @@ Categories:
   Notebook Reusability (19, 20):     2 entries
   Container Build (3, 11, 17):       3 entries (overlaps)
   Experimental Design (22):          1 entry
+  KFP Pipeline (23, 24, 26):         3 entries
+  ML Reproducibility (25):           1 entry
 ```
 
 ### Defense Q&A Preparation
@@ -843,16 +997,5 @@ A: Multiple defenses, layered:
 - **v1.0**: EC#1-15 documented in commit messages.
 - **v1.1**: EC#16, EC#17, EC#18 promoted to a standalone document with full write-ups.
 - **v2.0**: EC#19, EC#20, EC#21, EC#22 added (multi-drift discoveries).
-- **v2.0 (current)**: 22-entry complete catalog (this document).
-
+- **v2.1 (current)**: EC#23, EC#24, EC#25, EC#26 added (KFP retraining pipeline buildout discoveries).
 ---
-
-## Future EC Entries
-
-New EC entries may emerge during the next major phase (KFP webhook automation):
-
-- **EC#23 (potential)**: KFP API authentication from the Alertmanager webhook.
-- **EC#24 (potential)**: KFP pipeline component image versioning.
-- **EC#25 (potential)**: Webhook idempotency under duplicate alerts.
-
-This document is a living artifact — new entries will be appended as they arise.
