@@ -1,0 +1,19 @@
+# KFP pipeline component runtime dependencies
+# Used by: load_data_op, train_lstm_op, register_model_op, trigger_rollout_op
+# Versions mirror files/fastapi/app/requirements.txt for MLflow model load/save compatibility
+mlflow==2.18.0
+numpy==2.1.2
+boto3==1.35.0           # MLflow uses boto3 to fetch/push artifacts from/to MinIO
+scikit-learn==1.5.2     # For RMSE evaluation
+pandas==2.2.3           # For data manipulation
+# PyTorch CPU-only — must match files/fastapi/app/requirements.txt for cross-container model compatibility.
+# The custom index URL provides CPU-only wheels (~200 MB instead of ~700 MB GPU).
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.0+cpu
+# Kubernetes client — for trigger_rollout_op (kubectl create job baseline-refresh + rollout restart fastapi)
+kubernetes==30.1.0
+# DVC + S3 backend — for load_data_op (pulls DVC-tracked tensors from MinIO at runtime)
+# Pinned to match /root/thesis-infra/.venv (dvc 3.67.1)
+# This is the core thesis "reproducibility argument" — every retraining uses the
+# exact DVC-versioned data, addressed by content hash (md5).
+dvc[s3]==3.67.1

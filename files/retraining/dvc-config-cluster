@@ -1,0 +1,7 @@
+[core]
+    remote = minio-remote
+    no_scm = true
+['remote "minio-remote"']
+    url = s3://thesis-data/dvc
+    endpointurl = http://minio.minio.svc.cluster.local:9000
+    use_ssl = false

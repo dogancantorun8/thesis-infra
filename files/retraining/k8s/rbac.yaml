@@ -1,0 +1,83 @@
+# RBAC for KFP pipeline-runner ServiceAccount to enable trigger_rollout_op:
+#   - create/manage Jobs in monitoring namespace (baseline-refresh trigger)
+#   - rollout restart deployments in mlops namespace (FastAPI restart)
+#
+# Without this, trigger_rollout_op fails with "forbidden: User cannot..."
+
+---
+# Role: monitoring namespace — create/manage Jobs from CronJob
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kfp-baseline-refresh-trigger
+  namespace: monitoring
+  labels:
+    app: thesis-mlops
+    component: kfp-rbac
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "create", "delete", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kfp-baseline-refresh-trigger
+  namespace: monitoring
+  labels:
+    app: thesis-mlops
+    component: kfp-rbac
+subjects:
+  - kind: ServiceAccount
+    name: pipeline-runner
+    namespace: kubeflow
+roleRef:
+  kind: Role
+  name: kfp-baseline-refresh-trigger
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Role: mlops namespace — rollout restart FastAPI deployment
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kfp-fastapi-rollout
+  namespace: mlops
+  labels:
+    app: thesis-mlops
+    component: kfp-rbac
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/status"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kfp-fastapi-rollout
+  namespace: mlops
+  labels:
+    app: thesis-mlops
+    component: kfp-rbac
+subjects:
+  - kind: ServiceAccount
+    name: pipeline-runner
+    namespace: kubeflow
+roleRef:
+  kind: Role
+  name: kfp-fastapi-rollout
+  apiGroup: rbac.authorization.k8s.io

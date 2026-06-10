@@ -1,0 +1,94 @@
+# Build context filter for container builds (nerdctl/docker)
+# Goal: keep build context small (~MB instead of GB).
+# Big data files arrive via DVC pull at runtime, not via COPY.
+
+# ─── CRITICAL — Virtual environments (6.6 GB!) ────────────────────────
+.venv
+.venv/
+.venv/**
+venv
+venv/
+env/
+
+# ─── Python cache files ────────────────────────────────────────────────
+__pycache__
+__pycache__/
+**/__pycache__
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ─── Large data files (DVC-tracked, pulled at runtime) ────────────────
+data/raw
+data/processed
+data/drift
+data/external
+data/comparison
+data/cmapss
+
+# ─── Notebooks and outputs ─────────────────────────────────────────────
+notebooks
+*.ipynb
+*.ipynb_checkpoints
+**/.ipynb_checkpoints
+
+# ─── Git internals ─────────────────────────────────────────────────────
+.git
+.git/
+.gitignore
+.gitattributes
+
+# ─── DVC runtime state (KEEP config + pointers) ───────────────────────
+# We KEEP:
+#   .dvc/config            → copied via Dockerfile (cluster-aware version)
+#   data/*.dvc             → pointer files (small, needed for `dvc pull`)
+.dvc/cache
+.dvc/tmp
+.dvc/config.local
+.dvc/.gitignore
+
+# ─── Test/scratch artifacts ────────────────────────────────────────────
+.pytest_cache
+.coverage
+htmlcov
+*.log
+test-results
+tests/
+scratch/
+
+# ─── IDE / OS ──────────────────────────────────────────────────────────
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# ─── Ansible (not needed in image) ─────────────────────────────────────
+playbooks
+inventory
+roles
+
+# ─── Other containers (only need files/retraining/) ───────────────────
+files/fastapi
+files/baseline-refresh
+files/evidently
+files/data
+files/drift-webhook
+files/monitoring
+files/jupyter
+files/postgres
+files/scripts
+
+# ─── Standalone scripts/docs ───────────────────────────────────────────
+scripts
+docs
+README.md
+LICENSE
+*.md
+
+# ─── KFP runtime output ────────────────────────────────────────────────
+kfp/retraining_pipeline.yaml
+kfp/*.bak
+
