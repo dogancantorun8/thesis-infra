@@ -1,0 +1,299 @@
+---
+# playbooks/14-retraining-pipeline.yml
+# Builds the retraining container image, wires the cluster (RBAC + Secret),
+# compiles and uploads the KFP retraining pipeline, then verifies end-to-end.
+#
+# This playbook is idempotent: running it twice should produce zero changes
+# on a healthy system. The third run (after any single-piece deletion) should
+# restore the missing piece without touching the others.
+#
+# Four phases:
+#   1. Build — thesis/retraining:<tag> via nerdctl + buildkit (skip if present)
+#   2. Wire  — apply files/retraining/k8s/rbac.yaml + copy MinIO Secret to kubeflow ns
+#   3. Pipeline — compile pipeline YAML + idempotent upload (create-or-version)
+#   4. Verify — run the pipeline-setup test + healthcheck (kfp layer)
+#
+# Prerequisites (must already be in place — fulfilled by earlier playbooks):
+#   - k3s cluster up         (Playbook 02)
+#   - kubeflow namespace      (Playbook 06)
+#   - MinIO Secret in mlops   (Playbook 04 + 09)
+#   - nerdctl + buildkit      (Playbook 09)  ← Playbook 14 reuses them, does not reinstall
+#   - DVC remote configured   (Playbook 10)
+#
+# Tags:
+#   --tags build      Only Phase 1
+#   --tags cluster    Only Phase 2
+#   --tags pipeline   Only Phase 3
+#   --tags verify     Only Phase 4
+#
+# Usage:
+#   ansible-playbook playbooks/14-retraining-pipeline.yml --ask-vault-pass
+#   ansible-playbook playbooks/14-retraining-pipeline.yml --tags verify --ask-vault-pass
+#   ansible-playbook playbooks/14-retraining-pipeline.yml --check --ask-vault-pass  # dry-run
+
+- name: Build, wire, and register the KFP retraining pipeline
+  hosts: localhost
+  connection: local
+  become: true
+  vars_files:
+    - ../inventory/group_vars/all.yml
+    - ../inventory/group_vars/vault.yml
+
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+    PATH: "/usr/local/bin:/usr/bin:/bin"
+
+  vars:
+    thesis_repo: "/root/thesis-infra"
+    retraining_dockerfile: "{{ thesis_repo }}/files/retraining/Dockerfile"
+    retraining_rbac: "{{ thesis_repo }}/files/retraining/k8s/rbac.yaml"
+    retraining_pipeline_py: "{{ thesis_repo }}/kfp/retraining_pipeline.py"
+    deploy_script: "{{ thesis_repo }}/scripts/build-and-deploy-retraining.sh"
+    setup_test: "{{ thesis_repo }}/tests/04-ml/test-kfp-retraining-pipeline.sh"
+    healthcheck: "{{ thesis_repo }}/scripts/observability/healthcheck.sh"
+
+  tasks:
+
+    # ===========================================================
+    # PHASE 1: Build retraining container image
+    # ===========================================================
+
+    - name: PHASE 1 banner
+      ansible.builtin.debug:
+        msg: "── PHASE 1: Build retraining container image ({{ retraining_image }}) ──"
+      tags: ['build', 'phase1']
+
+    - name: Read current IMAGE tag from pipeline.py (source of truth)
+      ansible.builtin.shell: |
+        grep '^IMAGE = ' {{ retraining_pipeline_py }} \
+          | sed -E 's|^IMAGE = "[^:]+:([^"]+)".*|\1|'
+      register: pipeline_image_tag_result
+      changed_when: false
+      tags: ['build', 'phase1', 'cluster', 'phase2', 'pipeline', 'phase3', 'verify', 'phase4']
+
+    - name: Override retraining_image_tag from pipeline.py
+      ansible.builtin.set_fact:
+        retraining_image_tag: "{{ pipeline_image_tag_result.stdout | trim }}"
+        retraining_image: "{{ retraining_image_name }}:{{ pipeline_image_tag_result.stdout | trim }}"
+      tags: ['build', 'phase1', 'cluster', 'phase2', 'pipeline', 'phase3', 'verify', 'phase4']
+
+    - name: Show resolved image tag
+      ansible.builtin.debug:
+        msg: >
+          Resolved retraining_image = {{ retraining_image }}
+          (source: pipeline.py; all.yml default was {{ retraining_image_tag if hostvars['localhost'].retraining_image_tag is not defined else 'overridden' }})
+      tags: ['build', 'phase1', 'cluster', 'phase2', 'pipeline', 'phase3', 'verify', 'phase4']
+
+    - name: Verify nerdctl + buildkitd are installed (from Playbook 09)
+      ansible.builtin.shell: |
+        set -e
+        test -x /usr/local/bin/nerdctl || { echo "nerdctl missing"; exit 1; }
+        systemctl is-active buildkitd > /dev/null || { echo "buildkitd not running"; exit 1; }
+        echo "OK"
+      register: tooling_check
+      changed_when: false
+      failed_when: tooling_check.rc != 0
+      tags: ['build', 'phase1']
+
+    - name: Check if image already present in containerd
+      ansible.builtin.shell: |
+        nerdctl --address /run/k3s/containerd/containerd.sock \
+          --namespace k8s.io images 2>/dev/null \
+          | grep -cE "{{ retraining_image_name }}[[:space:]]+{{ retraining_image_tag }}[[:space:]]"
+      register: image_present
+      changed_when: false
+      failed_when: false
+      tags: ['build', 'phase1']
+
+    - name: Build retraining image with nerdctl (only if not present)
+      ansible.builtin.command:
+        cmd: >
+          nerdctl
+          --address /run/k3s/containerd/containerd.sock
+          --namespace k8s.io
+          build
+          -t {{ retraining_image }}
+          -f {{ retraining_dockerfile }}
+          {{ thesis_repo }}
+      when: image_present.stdout | int == 0
+      register: build_result
+      tags: ['build', 'phase1']
+
+    - name: Verify image is now present
+      ansible.builtin.shell: |
+        nerdctl --address /run/k3s/containerd/containerd.sock \
+          --namespace k8s.io images 2>/dev/null \
+          | grep -cE "{{ retraining_image_name }}[[:space:]]+{{ retraining_image_tag }}[[:space:]]"
+      register: image_verify
+      changed_when: false
+      failed_when: image_verify.stdout | int == 0
+      tags: ['build', 'phase1']
+
+    - name: Phase 1 result
+      ansible.builtin.debug:
+        msg: >
+          {{ retraining_image }} ready in containerd
+          (built: {{ 'YES' if image_present.stdout | int == 0 else 'NO — already present' }})
+      tags: ['build', 'phase1']
+
+
+    # ===========================================================
+    # PHASE 2: Cluster wiring (RBAC + Secret)
+    # ===========================================================
+
+    - name: PHASE 2 banner
+      ansible.builtin.debug:
+        msg: "── PHASE 2: Cluster wiring (RBAC + minio-credentials Secret) ──"
+      tags: ['cluster', 'phase2']
+
+    - name: Apply KFP retraining RBAC (Role + RoleBinding in monitoring + mlops)
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ retraining_rbac }}"
+      tags: ['cluster', 'phase2']
+
+    - name: Read minio-credentials Secret from mlops namespace
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        namespace: "{{ mlops_namespace }}"
+        name: minio-credentials
+      register: minio_secret_src
+      tags: ['cluster', 'phase2']
+
+    - name: Fail if source Secret is missing
+      ansible.builtin.fail:
+        msg: "Secret mlops/minio-credentials not found. Run Playbook 09 first."
+      when: minio_secret_src.resources | length == 0
+      tags: ['cluster', 'phase2']
+
+    - name: Copy minio-credentials Secret to kubeflow namespace
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: minio-credentials
+            namespace: kubeflow
+          type: "{{ minio_secret_src.resources[0].type }}"
+          data: "{{ minio_secret_src.resources[0].data }}"
+      tags: ['cluster', 'phase2']
+
+    - name: Verify Secret exists in kubeflow namespace
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Secret
+        namespace: kubeflow
+        name: minio-credentials
+      register: minio_secret_dst
+      failed_when: minio_secret_dst.resources | length == 0
+      tags: ['cluster', 'phase2']
+
+    - name: Verify RBAC bindings via kubectl auth can-i
+      ansible.builtin.shell: |
+        set -e
+        kubectl --as=system:serviceaccount:kubeflow:pipeline-runner \
+          auth can-i create jobs -n {{ monitoring_namespace }} | grep -q yes
+        kubectl --as=system:serviceaccount:kubeflow:pipeline-runner \
+          auth can-i patch deployments -n {{ mlops_namespace }} | grep -q yes
+        kubectl --as=system:serviceaccount:kubeflow:pipeline-runner \
+          auth can-i list pods -n {{ mlops_namespace }} | grep -q yes
+        echo "OK"
+      register: rbac_check
+      changed_when: false
+      failed_when: rbac_check.rc != 0
+      tags: ['cluster', 'phase2']
+
+    - name: Phase 2 result
+      ansible.builtin.debug:
+        msg: "Secret in kubeflow ns + RBAC 3/3 yes — cluster wiring OK"
+      tags: ['cluster', 'phase2']
+
+
+    # ===========================================================
+    # PHASE 3: Compile + upload KFP pipeline (idempotent)
+    # ===========================================================
+
+    - name: PHASE 3 banner
+      ansible.builtin.debug:
+        msg: "── PHASE 3: Compile + idempotent upload of KFP pipeline ──"
+      tags: ['pipeline', 'phase3']
+
+    - name: Ensure deploy script is executable
+      ansible.builtin.file:
+        path: "{{ deploy_script }}"
+        mode: '0755'
+      tags: ['pipeline', 'phase3']
+
+    - name: Run build-and-deploy-retraining.sh (compile + upload; build is no-op now)
+      ansible.builtin.shell: |
+        echo y | bash {{ deploy_script }} --tag {{ retraining_image_tag }} --no-test
+      args:
+        executable: /bin/bash
+      register: deploy_result
+      changed_when: >
+        ('Uploaded new version' in deploy_result.stdout) or
+        ('Created pipeline:' in deploy_result.stdout)
+      tags: ['pipeline', 'phase3']
+
+    - name: Phase 3 result
+      ansible.builtin.debug:
+        msg: >
+          {{
+            'NEW VERSION uploaded' if 'Uploaded new version' in deploy_result.stdout
+            else ('PIPELINE CREATED' if 'Created pipeline:' in deploy_result.stdout
+                  else 'no-op (already up to date)')
+          }}
+      tags: ['pipeline', 'phase3']
+
+
+    # ===========================================================
+    # PHASE 4: Verification (setup test + healthcheck kfp layer)
+    # ===========================================================
+
+    - name: PHASE 4 banner
+      ansible.builtin.debug:
+        msg: "── PHASE 4: Verification (pipeline-setup test + healthcheck) ──"
+      tags: ['verify', 'phase4']
+
+    - name: Run pipeline-setup test (tests/04-ml/test-kfp-retraining-pipeline.sh)
+      ansible.builtin.command: bash {{ setup_test }}
+      register: setup_test_result
+      changed_when: false
+      failed_when: setup_test_result.rc != 0
+      tags: ['verify', 'phase4']
+
+    - name: Run healthcheck kfp layer
+      ansible.builtin.command: bash {{ healthcheck }} kfp
+      register: healthcheck_result
+      changed_when: false
+      failed_when: healthcheck_result.rc != 0
+      tags: ['verify', 'phase4']
+
+    - name: Show healthcheck kfp output
+      ansible.builtin.debug:
+        msg: "{{ healthcheck_result.stdout_lines }}"
+      tags: ['verify', 'phase4']
+
+    - name: Phase 4 result
+      ansible.builtin.debug:
+        msg: >
+          Setup test exit={{ setup_test_result.rc }},
+          healthcheck kfp exit={{ healthcheck_result.rc }} — verification PASSED
+      tags: ['verify', 'phase4']
+
+
+    # ===========================================================
+    # Summary
+    # ===========================================================
+
+    - name: Playbook 14 complete
+      ansible.builtin.debug:
+        msg:
+          - "═══════════════════════════════════════════════════════"
+          - "Playbook 14 complete — KFP retraining pipeline ready"
+          - "═══════════════════════════════════════════════════════"
+          - "Image:     {{ retraining_image }}"
+          - "Pipeline:  {{ retraining_pipeline_name }}"
+          - "Next:      Trigger a run via webhook or manual KFP UI"
