@@ -3,22 +3,24 @@
 # =====================================
 # Comprehensive health check for the thesis-infra MLOps stack.
 #
-# Six layers verified:
+# Seven layers verified:
 #   1. infra     — node Ready, namespaces, pods Running, PVCs Bound
 #   2. storage   — MinIO buckets + PostgreSQL databases reachable
 #   3. resources — kubectl top nodes (CPU% / MEMORY%)
 #   4. ports     — kubectl port-forward tunnels listening locally
 #   5. services  — HTTP /health endpoints responding
 #   6. model     — FastAPI / MLflow alias / disk baseline / cluster baseline agree
+#   7. kfp       — KFP retraining pipeline (registered, image, workflow history)
 #
 # Usage:
-#   ./scripts/observability/healthcheck.sh              # full report (all 6 layers)
+#   ./scripts/observability/healthcheck.sh              # full report (all 7 layers)
 #   ./scripts/observability/healthcheck.sh infra        # only infra layer
 #   ./scripts/observability/healthcheck.sh storage      # only storage layer
 #   ./scripts/observability/healthcheck.sh resources    # only resource usage
 #   ./scripts/observability/healthcheck.sh ports        # only port-forward layer
 #   ./scripts/observability/healthcheck.sh services     # only service HTTP responses
 #   ./scripts/observability/healthcheck.sh model        # only model-version consistency
+#   ./scripts/observability/healthcheck.sh kfp          # only KFP retraining pipeline layer
 #   ./scripts/observability/healthcheck.sh --quiet      # CI mode: exit 0 on success, 1 on failure
 #
 # Exit codes:
@@ -342,6 +344,124 @@ except Exception:
   fi
 }
 
+check_kfp_retraining() {
+  section "7. KFP retraining pipeline"
+
+  # Skip if KFP not deployed yet
+  if ! kubectl get deployment ml-pipeline -n kubeflow >/dev/null 2>&1; then
+    info "KFP not deployed (Playbook 06 not run)"
+    return
+  fi
+
+  # Locate the KFP API pod (in-cluster query, no port-forward needed)
+  local kfp_pod
+  kfp_pod=$(kubectl get pod -n kubeflow -l app=ml-pipeline \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  if [ -z "$kfp_pod" ]; then
+    fail "KFP API pod" "could not locate ml-pipeline pod"
+    return
+  fi
+
+  # Query the pipelines list via kubectl exec (no port-forward dependency)
+  local pipelines_json pipeline_id pipeline_count
+  pipelines_json=$(kubectl exec -n kubeflow "$kfp_pod" -- \
+    wget -qO- "http://localhost:8888/apis/v2beta1/pipelines" 2>/dev/null || echo "")
+
+  if echo "$pipelines_json" | grep -q '"display_name":"cmapss-rul-retraining"'; then
+    pass "Pipeline registered          cmapss-rul-retraining"
+  else
+    fail "Pipeline NOT registered" \
+         "deploy: ./scripts/build-and-deploy-retraining.sh"
+    return
+  fi
+
+  # Extract pipeline_id for downstream queries
+  pipeline_id=$(echo "$pipelines_json" \
+    | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for p in (data.get('pipelines') or []):
+    if p.get('display_name') == 'cmapss-rul-retraining':
+        print(p.get('pipeline_id', '?'))
+        break
+" 2>/dev/null)
+  if [ -n "$pipeline_id" ] && [ "$pipeline_id" != "?" ]; then
+    info "Pipeline ID                  ${pipeline_id}"
+  fi
+
+  # Count pipeline versions
+  pipeline_count=$(kubectl exec -n kubeflow "$kfp_pod" -- \
+    wget -qO- "http://localhost:8888/apis/v2beta1/pipelines/${pipeline_id}/versions" 2>/dev/null \
+    | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    print(len(data.get('pipeline_versions') or []))
+except Exception:
+    print(0)
+" 2>/dev/null)
+  if [ -n "$pipeline_count" ] && [ "$pipeline_count" -gt 0 ]; then
+    pass "Pipeline versions            ${pipeline_count}"
+  else
+    fail "No pipeline versions found"
+  fi
+
+  # Container image tag referenced by pipeline.py exists in containerd
+  local pipeline_image image_found
+  pipeline_image=$(grep '^IMAGE = ' /root/thesis-infra/kfp/retraining_pipeline.py 2>/dev/null \
+    | sed -E 's|^IMAGE = "([^"]+)".*|\1|')
+  if [ -n "$pipeline_image" ]; then
+    image_found=$(nerdctl --address /run/k3s/containerd/containerd.sock \
+      --namespace k8s.io images 2>/dev/null \
+      | grep -cE "thesis/retraining[[:space:]]+${pipeline_image#*:}[[:space:]]" 2>/dev/null) || image_found=0
+    if [ "$image_found" -gt 0 ]; then
+      pass "Container image present      ${pipeline_image}"
+    else
+      fail "Container image missing      ${pipeline_image}" \
+           "build: ./scripts/build-and-deploy-retraining.sh --tag ${pipeline_image#*:}"
+    fi
+  else
+    info "Could not parse IMAGE from pipeline.py"
+  fi
+
+  # Latest workflow status (cmapss-rul-* in kubeflow ns)
+  local latest_wf latest_status latest_age
+  latest_wf=$(kubectl get workflow -n kubeflow \
+    --sort-by=.metadata.creationTimestamp --no-headers 2>/dev/null \
+    | grep "cmapss-rul-retraining-" | tail -1)
+  if [ -n "$latest_wf" ]; then
+    latest_status=$(echo "$latest_wf" | awk '{print $2}')
+    latest_age=$(echo "$latest_wf" | awk '{print $3}')
+    info "Latest workflow              ${latest_status} (${latest_age} ago)"
+  else
+    info "Latest workflow              (no runs yet)"
+  fi
+
+  # Aggregated workflow stats (all-time, for closed-loop iteration tracking)
+  local wf_total wf_succ wf_fail wf_run
+  # Note: grep -c always returns the count to stdout. We use { ...; } || true
+  # to swallow non-zero exit on no-match without spuriously echoing extras.
+  wf_total=$(kubectl get workflow -n kubeflow --no-headers 2>/dev/null \
+    | grep -c "cmapss-rul-retraining-" 2>/dev/null) || wf_total=0
+  wf_succ=$(kubectl get workflow -n kubeflow --no-headers 2>/dev/null \
+    | grep "cmapss-rul-retraining-" | grep -c "Succeeded" 2>/dev/null) || wf_succ=0
+  wf_fail=$(kubectl get workflow -n kubeflow --no-headers 2>/dev/null \
+    | grep "cmapss-rul-retraining-" | grep -c "Failed" 2>/dev/null) || wf_fail=0
+  wf_run=$(kubectl get workflow -n kubeflow --no-headers 2>/dev/null \
+    | grep "cmapss-rul-retraining-" | grep -c "Running" 2>/dev/null) || wf_run=0
+  if [ "$wf_total" -gt 0 ]; then
+    info "Workflow history             total=${wf_total}  succeeded=${wf_succ}  failed=${wf_fail}  running=${wf_run}"
+  fi
+
+  # Secret + RBAC presence (light check; full check is in tests/04-ml/)
+  if kubectl get secret minio-credentials -n kubeflow >/dev/null 2>&1; then
+    pass "Secret kubeflow/minio-credentials"
+  else
+    fail "Secret kubeflow/minio-credentials missing" \
+         "copy: kubectl get secret minio-credentials -n mlops -o yaml | sed 's/namespace: mlops/namespace: kubeflow/' | kubectl apply -f -"
+  fi
+}
+
 # ──────────────────────────────────────────────────────────────────
 # Main
 # ──────────────────────────────────────────────────────────────────
@@ -357,7 +477,8 @@ Layers:
   services   HTTP /health endpoints
   model      FastAPI / MLflow alias / disk baseline / cluster baseline agree
 
-  (default)  All six layers
+  kfp        KFP retraining pipeline (registered + image + workflow history)
+  (default)  All seven layers
 
 Flags:
   --quiet    Suppress output; exit 0 on success, 1 on any failure
@@ -387,6 +508,7 @@ case "$MODE" in
   ports)     check_ports ;;
   services)  check_services ;;
   model)     check_model_consistency ;;
+  kfp)       check_kfp_retraining ;;
   all|--quiet)
     check_infra
     check_storage
@@ -394,6 +516,7 @@ case "$MODE" in
     check_ports
     check_services
     check_model_consistency
+    check_kfp_retraining
     ;;
   -h|--help)
     usage
