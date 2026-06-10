@@ -21,3 +21,14 @@ inventory/group_vars/vault.yml
 *.ipynb_checkpoints
 # END ANSIBLE MANAGED — Playbook 10 (data + dev env)
 *.bak
+
+# === Backup files from in-place patches (Adim 4 buildout) ===
+*.bak
+*.bak-*
+*.orig
+
+# === Python cache ===
+**/__pycache__/
+*.pyc
+*.pyo
+
