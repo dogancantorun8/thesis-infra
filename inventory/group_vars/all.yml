@@ -154,3 +154,11 @@ evidently_image: "{{ evidently_image_name }}:{{ evidently_image_tag }}"
 baseline_refresh_image_name: "thesis/baseline-refresh"
 baseline_refresh_image_tag: "0.1.2"
 baseline_refresh_image: "{{ baseline_refresh_image_name }}:{{ baseline_refresh_image_tag }}"
+
+# KFP retraining pipeline (Playbook 14) - on-demand model retraining
+# triggered by drift detection or manual operator. Builds the training
+# image, wires KFP RBAC + Secret, compiles + uploads the pipeline.
+retraining_image_name: "thesis/retraining"
+retraining_image_tag: "0.3.0"
+retraining_image: "{{ retraining_image_name }}:{{ retraining_image_tag }}"
+retraining_pipeline_name: "cmapss-rul-retraining"

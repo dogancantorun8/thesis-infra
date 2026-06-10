@@ -1,0 +1,553 @@
+# PIPELINE DEFINITION
+# Name: cmapss-rul-retraining
+# Description: Drift-triggered LSTM retraining + champion-challenger + auto-rollout. Replaces manual Notebook 03 invocation (closes the closed-loop).
+# Inputs:
+#    batch_size: int [Default: 64.0]
+#    epochs: int [Default: 30.0]
+#    learning_rate: float [Default: 0.001]
+#    mlflow_tracking_uri: str [Default: 'http://mlflow.mlops.svc.cluster.local:5000']
+#    s3_bucket: str [Default: 'thesis-data']
+#    s3_endpoint: str [Default: 'http://minio.minio.svc.cluster.local:9000']
+#    threshold_factor: float [Default: 0.95]
+components:
+  comp-extract-alias-op:
+    executorLabel: exec-extract-alias-op
+    inputDefinitions:
+      artifacts:
+        register_output:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-extract-new-version-op:
+    executorLabel: exec-extract-new-version-op
+    inputDefinitions:
+      artifacts:
+        register_output:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-extract-run-id-op:
+    executorLabel: exec-extract-run-id-op
+    inputDefinitions:
+      artifacts:
+        train_output:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-extract-val-rmse-op:
+    executorLabel: exec-extract-val-rmse-op
+    inputDefinitions:
+      artifacts:
+        train_output:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: NUMBER_DOUBLE
+  comp-load-data-op:
+    executorLabel: exec-load-data-op
+    inputDefinitions:
+      parameters:
+        s3_bucket:
+          defaultValue: thesis-data
+          isOptional: true
+          parameterType: STRING
+        s3_endpoint:
+          defaultValue: http://minio.minio.svc.cluster.local:9000
+          isOptional: true
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        data_output:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-register-model-op:
+    executorLabel: exec-register-model-op
+    inputDefinitions:
+      parameters:
+        mlflow_run_id:
+          parameterType: STRING
+        mlflow_tracking_uri:
+          defaultValue: http://mlflow.mlops.svc.cluster.local:5000
+          isOptional: true
+          parameterType: STRING
+        threshold_factor:
+          defaultValue: 0.95
+          isOptional: true
+          parameterType: NUMBER_DOUBLE
+        val_rmse:
+          parameterType: NUMBER_DOUBLE
+    outputDefinitions:
+      artifacts:
+        register_output:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-train-lstm-op:
+    executorLabel: exec-train-lstm-op
+    inputDefinitions:
+      artifacts:
+        data_input:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        batch_size:
+          defaultValue: 64.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        epochs:
+          defaultValue: 30.0
+          isOptional: true
+          parameterType: NUMBER_INTEGER
+        learning_rate:
+          defaultValue: 0.001
+          isOptional: true
+          parameterType: NUMBER_DOUBLE
+        mlflow_tracking_uri:
+          defaultValue: http://mlflow.mlops.svc.cluster.local:5000
+          isOptional: true
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        train_output:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+  comp-trigger-rollout-op:
+    executorLabel: exec-trigger-rollout-op
+    inputDefinitions:
+      parameters:
+        alias_assigned:
+          parameterType: STRING
+        new_version:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        rollout_output:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-extract-alias-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - extract_alias_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.10.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef extract_alias_op(register_output: Input[Artifact]) -> str:\n\
+          \    \"\"\"Extract alias_assigned from register_model_op's JSON output.\"\
+          \"\"\n    import json\n    with open(register_output.path) as f:\n     \
+          \   data = json.load(f)\n    return str(data[\"alias_assigned\"])\n\n"
+        image: python:3.12-slim
+    exec-extract-new-version-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - extract_new_version_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.10.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef extract_new_version_op(register_output: Input[Artifact]) -> str:\n\
+          \    \"\"\"Extract new_version from register_model_op's JSON output.\"\"\
+          \"\n    import json\n    with open(register_output.path) as f:\n       \
+          \ data = json.load(f)\n    return str(data[\"new_version\"])\n\n"
+        image: python:3.12-slim
+    exec-extract-run-id-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - extract_run_id_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.10.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef extract_run_id_op(train_output: Input[Artifact]) -> str:\n  \
+          \  \"\"\"Extract mlflow_run_id from train_lstm_op's JSON output.\"\"\"\n\
+          \    import json\n    with open(train_output.path) as f:\n        data =\
+          \ json.load(f)\n    return str(data[\"mlflow_run_id\"])\n\n"
+        image: python:3.12-slim
+    exec-extract-val-rmse-op:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - extract_val_rmse_op
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.10.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef extract_val_rmse_op(train_output: Input[Artifact]) -> float:\n\
+          \    \"\"\"Extract val_rmse from train_lstm_op's JSON output.\"\"\"\n  \
+          \  import json\n    with open(train_output.path) as f:\n        data = json.load(f)\n\
+          \    return float(data[\"val_rmse\"])\n\n"
+        image: python:3.12-slim
+    exec-load-data-op:
+      container:
+        args:
+        - --output-dir
+        - '{{$.outputs.artifacts[''data_output''].path}}'
+        command:
+        - python
+        - /app/load_data.py
+        env:
+        - name: MLFLOW_S3_ENDPOINT_URL
+          value: http://minio.minio.svc.cluster.local:9000
+        - name: AWS_DEFAULT_REGION
+          value: us-east-1
+        image: thesis/retraining:0.4.0
+    exec-register-model-op:
+      container:
+        args:
+        - --mlflow-run-id
+        - '{{$.inputs.parameters[''mlflow_run_id'']}}'
+        - --val-rmse
+        - '{{$.inputs.parameters[''val_rmse'']}}'
+        - --threshold-factor
+        - '{{$.inputs.parameters[''threshold_factor'']}}'
+        - --mlflow-tracking-uri
+        - '{{$.inputs.parameters[''mlflow_tracking_uri'']}}'
+        - --output-file
+        - '{{$.outputs.artifacts[''register_output''].path}}'
+        command:
+        - python
+        - /app/register_model.py
+        env:
+        - name: MLFLOW_S3_ENDPOINT_URL
+          value: http://minio.minio.svc.cluster.local:9000
+        - name: AWS_DEFAULT_REGION
+          value: us-east-1
+        image: thesis/retraining:0.4.0
+    exec-train-lstm-op:
+      container:
+        args:
+        - --data-dir
+        - '{{$.inputs.artifacts[''data_input''].path}}'
+        - --epochs
+        - '{{$.inputs.parameters[''epochs'']}}'
+        - --batch-size
+        - '{{$.inputs.parameters[''batch_size'']}}'
+        - --learning-rate
+        - '{{$.inputs.parameters[''learning_rate'']}}'
+        - --mlflow-tracking-uri
+        - '{{$.inputs.parameters[''mlflow_tracking_uri'']}}'
+        - --output-file
+        - '{{$.outputs.artifacts[''train_output''].path}}'
+        command:
+        - python
+        - /app/train_lstm.py
+        env:
+        - name: MLFLOW_S3_ENDPOINT_URL
+          value: http://minio.minio.svc.cluster.local:9000
+        - name: AWS_DEFAULT_REGION
+          value: us-east-1
+        image: thesis/retraining:0.4.0
+    exec-trigger-rollout-op:
+      container:
+        args:
+        - --new-version
+        - '{{$.inputs.parameters[''new_version'']}}'
+        - --alias-assigned
+        - '{{$.inputs.parameters[''alias_assigned'']}}'
+        - --output-file
+        - '{{$.outputs.artifacts[''rollout_output''].path}}'
+        command:
+        - python
+        - /app/trigger_rollout.py
+        image: thesis/retraining:0.4.0
+pipelineInfo:
+  description: Drift-triggered LSTM retraining + champion-challenger + auto-rollout.
+    Replaces manual Notebook 03 invocation (closes the closed-loop).
+  name: cmapss-rul-retraining
+root:
+  dag:
+    tasks:
+      extract-alias-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-extract-alias-op
+        dependentTasks:
+        - register-model-op
+        inputs:
+          artifacts:
+            register_output:
+              taskOutputArtifact:
+                outputArtifactKey: register_output
+                producerTask: register-model-op
+        taskInfo:
+          name: extract-alias-op
+      extract-new-version-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-extract-new-version-op
+        dependentTasks:
+        - register-model-op
+        inputs:
+          artifacts:
+            register_output:
+              taskOutputArtifact:
+                outputArtifactKey: register_output
+                producerTask: register-model-op
+        taskInfo:
+          name: extract-new-version-op
+      extract-run-id-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-extract-run-id-op
+        dependentTasks:
+        - train-lstm-op
+        inputs:
+          artifacts:
+            train_output:
+              taskOutputArtifact:
+                outputArtifactKey: train_output
+                producerTask: train-lstm-op
+        taskInfo:
+          name: extract-run-id-op
+      extract-val-rmse-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-extract-val-rmse-op
+        dependentTasks:
+        - train-lstm-op
+        inputs:
+          artifacts:
+            train_output:
+              taskOutputArtifact:
+                outputArtifactKey: train_output
+                producerTask: train-lstm-op
+        taskInfo:
+          name: extract-val-rmse-op
+      load-data-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-load-data-op
+        inputs:
+          parameters:
+            s3_bucket:
+              componentInputParameter: s3_bucket
+            s3_endpoint:
+              componentInputParameter: s3_endpoint
+        taskInfo:
+          name: load-data-op
+      register-model-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-register-model-op
+        dependentTasks:
+        - extract-run-id-op
+        - extract-val-rmse-op
+        inputs:
+          parameters:
+            mlflow_run_id:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: extract-run-id-op
+            mlflow_tracking_uri:
+              componentInputParameter: mlflow_tracking_uri
+            threshold_factor:
+              componentInputParameter: threshold_factor
+            val_rmse:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: extract-val-rmse-op
+        taskInfo:
+          name: register-model-op
+      train-lstm-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-lstm-op
+        dependentTasks:
+        - load-data-op
+        inputs:
+          artifacts:
+            data_input:
+              taskOutputArtifact:
+                outputArtifactKey: data_output
+                producerTask: load-data-op
+          parameters:
+            batch_size:
+              componentInputParameter: batch_size
+            epochs:
+              componentInputParameter: epochs
+            learning_rate:
+              componentInputParameter: learning_rate
+            mlflow_tracking_uri:
+              componentInputParameter: mlflow_tracking_uri
+        taskInfo:
+          name: train-lstm-op
+      trigger-rollout-op:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-trigger-rollout-op
+        dependentTasks:
+        - extract-alias-op
+        - extract-new-version-op
+        inputs:
+          parameters:
+            alias_assigned:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: extract-alias-op
+            new_version:
+              taskOutputParameter:
+                outputParameterKey: Output
+                producerTask: extract-new-version-op
+        taskInfo:
+          name: trigger-rollout-op
+  inputDefinitions:
+    parameters:
+      batch_size:
+        defaultValue: 64.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      epochs:
+        defaultValue: 30.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      learning_rate:
+        defaultValue: 0.001
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      mlflow_tracking_uri:
+        defaultValue: http://mlflow.mlops.svc.cluster.local:5000
+        isOptional: true
+        parameterType: STRING
+      s3_bucket:
+        defaultValue: thesis-data
+        isOptional: true
+        parameterType: STRING
+      s3_endpoint:
+        defaultValue: http://minio.minio.svc.cluster.local:9000
+        isOptional: true
+        parameterType: STRING
+      threshold_factor:
+        defaultValue: 0.95
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.10.1
+---
+platforms:
+  kubernetes:
+    deploymentSpec:
+      executors:
+        exec-load-data-op:
+          secretAsEnv:
+          - keyToEnv:
+            - envVar: AWS_ACCESS_KEY_ID
+              secretKey: access_key
+            - envVar: AWS_SECRET_ACCESS_KEY
+              secretKey: secret_key
+            secretName: minio-credentials
+        exec-register-model-op:
+          secretAsEnv:
+          - keyToEnv:
+            - envVar: AWS_ACCESS_KEY_ID
+              secretKey: access_key
+            - envVar: AWS_SECRET_ACCESS_KEY
+              secretKey: secret_key
+            secretName: minio-credentials
+        exec-train-lstm-op:
+          secretAsEnv:
+          - keyToEnv:
+            - envVar: AWS_ACCESS_KEY_ID
+              secretKey: access_key
+            - envVar: AWS_SECRET_ACCESS_KEY
+              secretKey: secret_key
+            secretName: minio-credentials
