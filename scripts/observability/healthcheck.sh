@@ -3,7 +3,7 @@
 # =====================================
 # Comprehensive health check for the thesis-infra MLOps stack.
 #
-# Seven layers verified:
+# Eight layers verified:
 #   1. infra     — node Ready, namespaces, pods Running, PVCs Bound
 #   2. storage   — MinIO buckets + PostgreSQL databases reachable
 #   3. resources — kubectl top nodes (CPU% / MEMORY%)
@@ -11,9 +11,10 @@
 #   5. services  — HTTP /health endpoints responding
 #   6. model     — FastAPI / MLflow alias / disk baseline / cluster baseline agree
 #   7. kfp       — KFP retraining pipeline (registered, image, workflow history)
+#   8. webhook   — Drift webhook (deployment, /health, NetworkPolicy, Alertmanager config)
 #
 # Usage:
-#   ./scripts/observability/healthcheck.sh              # full report (all 7 layers)
+#   ./scripts/observability/healthcheck.sh              # full report (all 8 layers)
 #   ./scripts/observability/healthcheck.sh infra        # only infra layer
 #   ./scripts/observability/healthcheck.sh storage      # only storage layer
 #   ./scripts/observability/healthcheck.sh resources    # only resource usage
@@ -21,6 +22,7 @@
 #   ./scripts/observability/healthcheck.sh services     # only service HTTP responses
 #   ./scripts/observability/healthcheck.sh model        # only model-version consistency
 #   ./scripts/observability/healthcheck.sh kfp          # only KFP retraining pipeline layer
+#   ./scripts/observability/healthcheck.sh webhook      # only drift-webhook layer
 #   ./scripts/observability/healthcheck.sh --quiet      # CI mode: exit 0 on success, 1 on failure
 #
 # Exit codes:
@@ -462,6 +464,127 @@ except Exception:
   fi
 }
 
+check_drift_webhook() {
+  section "8. Drift webhook (closed-loop trigger)"
+
+  # Skip if drift-webhook not deployed yet
+  if ! kubectl get deployment drift-webhook -n mlops >/dev/null 2>&1; then
+    info "drift-webhook not deployed (Playbook 15 not run)"
+    return
+  fi
+
+  # Deployment readiness
+  local ready_replicas desired_replicas
+  ready_replicas=$(kubectl get deployment drift-webhook -n mlops \
+    -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+  desired_replicas=$(kubectl get deployment drift-webhook -n mlops \
+    -o jsonpath='{.spec.replicas}' 2>/dev/null)
+  ready_replicas=${ready_replicas:-0}
+  desired_replicas=${desired_replicas:-1}
+
+  if [ "$ready_replicas" = "$desired_replicas" ] && [ "$ready_replicas" -ge 1 ]; then
+    pass "Deployment ready             ${ready_replicas}/${desired_replicas} replicas"
+  else
+    fail "Deployment NOT ready         ${ready_replicas}/${desired_replicas} replicas" \
+         "check: kubectl describe deployment drift-webhook -n mlops"
+    return
+  fi
+
+  # Pod identity (informational)
+  local pod_name pod_restart
+  pod_name=$(kubectl get pod -n mlops -l app=drift-webhook \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  pod_restart=$(kubectl get pod -n mlops -l app=drift-webhook \
+    -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' 2>/dev/null)
+  info "Pod                          ${pod_name} (restarts=${pod_restart:-?})"
+
+  # /health endpoint reachable + KFP connectivity check from inside the pod
+  local health_json kfp_reachable
+  health_json=$(kubectl exec -n mlops deployment/drift-webhook -- \
+    python -c "
+import urllib.request, json
+r = urllib.request.urlopen('http://localhost:8080/health', timeout=5)
+print(r.read().decode())
+" 2>/dev/null)
+
+  if [ -n "$health_json" ]; then
+    kfp_reachable=$(echo "$health_json" | python3 -c "
+import sys, json
+print(json.load(sys.stdin).get('kfp_reachable', 'false'))
+" 2>/dev/null)
+    if [ "$kfp_reachable" = "True" ] || [ "$kfp_reachable" = "true" ]; then
+      pass "/health endpoint             kfp_reachable=true"
+    else
+      fail "/health endpoint             kfp_reachable=false" \
+           "check NetworkPolicy + ml-pipeline pod status"
+    fi
+  else
+    fail "/health endpoint unreachable" "pod is up but webhook not responding"
+    return
+  fi
+
+  # NetworkPolicy presence (kubeflow ns)
+  if kubectl get networkpolicy allow-drift-webhook-to-ml-pipeline -n kubeflow >/dev/null 2>&1; then
+    pass "NetworkPolicy present        kubeflow/allow-drift-webhook-to-ml-pipeline"
+  else
+    fail "NetworkPolicy missing        kubeflow/allow-drift-webhook-to-ml-pipeline" \
+         "apply: kubectl apply -f files/drift-webhook/k8s/networkpolicy.yaml"
+  fi
+
+  # Alertmanager receiver — webhook URL configured?
+  local am_pod am_config_has_webhook
+  am_pod=$(kubectl get pod -n monitoring -l app.kubernetes.io/name=alertmanager \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  if [ -n "$am_pod" ]; then
+    am_config_has_webhook=$(kubectl exec -n monitoring "$am_pod" -c alertmanager -- \
+      cat /etc/alertmanager/config_out/alertmanager.env.yaml 2>/dev/null \
+      | grep -c "drift-webhook.mlops" 2>/dev/null) || am_config_has_webhook=0
+    if [ "$am_config_has_webhook" -gt 0 ]; then
+      pass "Alertmanager receiver        model-drift -> drift-webhook URL configured"
+    else
+      fail "Alertmanager receiver        webhook URL missing from config" \
+           "helm upgrade prometheus prometheus-community/kube-prometheus-stack --version 85.0.3 --values files/monitoring/kube-prometheus-stack-values.yaml -n monitoring"
+    fi
+  else
+    info "Alertmanager pod not found (skipping receiver config check)"
+  fi
+
+  # Webhook activity metrics (informational — proves closed-loop ran).
+  # Pass Python via stdin (-i + heredoc) to avoid -c quoting issues across
+  # bash/kubectl/python layers — quoted labels like {result="submitted"} get
+  # mangled otherwise.
+  local metrics_summary
+  metrics_summary=$(kubectl exec -i -n mlops deployment/drift-webhook -- python <<'PYHEALTH'
+import urllib.request
+text = urllib.request.urlopen('http://localhost:8080/metrics', timeout=5).read().decode()
+submitted = skipped = failed = runs = 0
+for line in text.split('\n'):
+    line = line.strip()
+    if not line or line.startswith('#'):
+        continue
+    if line.startswith('drift_webhook_events_total{result="submitted"}'):
+        submitted = int(float(line.split()[1]))
+    elif line.startswith('drift_webhook_events_total{result="skipped"}'):
+        skipped = int(float(line.split()[1]))
+    elif line.startswith('drift_webhook_events_total{result="failed"}'):
+        failed = int(float(line.split()[1]))
+    elif line.startswith('drift_webhook_kfp_runs_total '):
+        runs = int(float(line.split()[1]))
+print(f"{submitted} {skipped} {failed} {runs}")
+PYHEALTH
+)
+
+  if [ -n "$metrics_summary" ]; then
+    submitted_int=$(echo "$metrics_summary" | awk '{print $1}')
+    skipped_int=$(echo   "$metrics_summary" | awk '{print $2}')
+    failed_int=$(echo    "$metrics_summary" | awk '{print $3}')
+    runs_int=$(echo      "$metrics_summary" | awk '{print $4}')
+
+    info "Webhook event breakdown      submitted=${submitted_int}  skipped=${skipped_int}  failed=${failed_int}"
+    info "KFP runs triggered by webhook  ${runs_int}"
+  fi
+}
+
 # ──────────────────────────────────────────────────────────────────
 # Main
 # ──────────────────────────────────────────────────────────────────
@@ -478,7 +601,8 @@ Layers:
   model      FastAPI / MLflow alias / disk baseline / cluster baseline agree
 
   kfp        KFP retraining pipeline (registered + image + workflow history)
-  (default)  All seven layers
+  webhook    Drift webhook (deployment, health, NetworkPolicy, Alertmanager config)
+  (default)  All eight layers
 
 Flags:
   --quiet    Suppress output; exit 0 on success, 1 on any failure
@@ -509,6 +633,7 @@ case "$MODE" in
   services)  check_services ;;
   model)     check_model_consistency ;;
   kfp)       check_kfp_retraining ;;
+  webhook)   check_drift_webhook ;;
   all|--quiet)
     check_infra
     check_storage
@@ -517,6 +642,7 @@ case "$MODE" in
     check_services
     check_model_consistency
     check_kfp_retraining
+    check_drift_webhook
     ;;
   -h|--help)
     usage
