@@ -1,0 +1,307 @@
+---
+# playbooks/15-drift-webhook.yml
+# Provisions the drift webhook (closed-loop trigger) from scratch.
+#
+# Architecture:
+#   Evidently CronJob → Prometheus → Alertmanager → THIS webhook → KFP
+#   Webhook lives in mlops ns, submits runs to KFP API in kubeflow ns
+#   via a minimum-privilege NetworkPolicy.
+#
+# Phases:
+#   1. Build container image (nerdctl, k3s containerd)
+#   2. Cluster RBAC + workload (ServiceAccount, Role, Deployment, Service,
+#      ServiceMonitor, NetworkPolicy)
+#   3. Alertmanager Helm values verification (optional helm upgrade)
+#   4. Verify (deployment ready, /health endpoint, Alertmanager config)
+#
+# Tags:
+#   --tags build         Only Phase 1
+#   --tags cluster       Only Phase 2
+#   --tags alertmanager  Only Phase 3
+#   --tags verify        Only Phase 4
+#
+# Extra variables:
+#   helm_upgrade=true    Force Helm upgrade in Phase 3 (default: false; only
+#                        verifies config). Use after editing
+#                        kube-prometheus-stack-values.yaml.
+#
+# Usage:
+#   ansible-playbook playbooks/15-drift-webhook.yml --ask-vault-pass
+#   ansible-playbook playbooks/15-drift-webhook.yml --ask-vault-pass --tags verify
+#   ansible-playbook playbooks/15-drift-webhook.yml --ask-vault-pass \
+#     --extra-vars "helm_upgrade=true"
+
+- name: Build and deploy the drift webhook (closed-loop trigger)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - vars/all.yml
+    - vars/vault.yml
+
+  vars:
+    repo_root: "{{ playbook_dir | dirname }}"
+    webhook_image_name: "thesis/drift-webhook"
+    webhook_image_tag: "0.1.1"
+    webhook_image: "{{ webhook_image_name }}:{{ webhook_image_tag }}"
+    webhook_namespace: "mlops"
+    monitoring_namespace: "monitoring"
+    kubeflow_namespace: "kubeflow"
+    prometheus_release: "prometheus"
+    prometheus_chart_version: "85.0.3"
+    helm_upgrade: false       # default: skip helm upgrade in Phase 3
+
+  tasks:
+
+    # ──────────────────────────────────────────────────────────────────
+    # PHASE 0 — Pre-flight (always runs; sets discovery facts)
+    # ──────────────────────────────────────────────────────────────────
+    - name: Phase 0 — Verify k3s + kubectl reachable
+      ansible.builtin.command: kubectl version --client=true -o json
+      register: kubectl_check
+      changed_when: false
+      tags: ['build', 'phase1', 'cluster', 'phase2', 'alertmanager', 'phase3', 'verify', 'phase4']
+
+    - name: Phase 0 — Verify nerdctl + k3s containerd reachable
+      ansible.builtin.command:
+        cmd: nerdctl --address /run/k3s/containerd/containerd.sock --namespace k8s.io images
+      register: nerdctl_check
+      changed_when: false
+      tags: ['build', 'phase1']
+
+    - name: Phase 0 — Discover webhook image tag from deployment manifest
+      ansible.builtin.shell: |
+        grep 'thesis/drift-webhook:' {{ repo_root }}/files/drift-webhook/k8s/deployment.yaml \
+          | head -1 \
+          | sed 's|.*thesis/drift-webhook:||' | sed 's|".*||' | tr -d ' '
+      register: discovered_tag_result
+      changed_when: false
+      tags: ['build', 'phase1', 'cluster', 'phase2', 'alertmanager', 'phase3', 'verify', 'phase4']
+
+    - name: Phase 0 — Override webhook_image_tag from deployment.yaml (source of truth)
+      ansible.builtin.set_fact:
+        webhook_image_tag: "{{ discovered_tag_result.stdout | trim }}"
+        webhook_image: "{{ webhook_image_name }}:{{ discovered_tag_result.stdout | trim }}"
+      when: discovered_tag_result.stdout | trim | length > 0
+      tags: ['build', 'phase1', 'cluster', 'phase2', 'alertmanager', 'phase3', 'verify', 'phase4']
+
+    - name: Phase 0 — Show resolved image
+      ansible.builtin.debug:
+        msg: "Webhook image: {{ webhook_image }}"
+      tags: ['build', 'phase1', 'cluster', 'phase2', 'alertmanager', 'phase3', 'verify', 'phase4']
+
+    # ──────────────────────────────────────────────────────────────────
+    # PHASE 1 — Build container image
+    # ──────────────────────────────────────────────────────────────────
+    - name: Phase 1 — Check if image already present in containerd
+      ansible.builtin.shell: |
+        nerdctl --address /run/k3s/containerd/containerd.sock --namespace k8s.io \
+          images --format '{{ "{{" }}.Repository{{ "}}" }}:{{ "{{" }}.Tag{{ "}}" }}' \
+          | grep -F '{{ webhook_image }}'
+      register: image_exists
+      changed_when: false
+      failed_when: false
+      tags: ['build', 'phase1']
+
+    - name: Phase 1 — Build webhook container (only if missing)
+      ansible.builtin.command:
+        cmd: >-
+          nerdctl
+          --address /run/k3s/containerd/containerd.sock
+          --namespace k8s.io
+          build
+          -t {{ webhook_image }}
+          -f {{ repo_root }}/files/drift-webhook/Dockerfile
+          {{ repo_root }}/files/drift-webhook/
+      when: image_exists.rc != 0
+      register: image_build
+      changed_when: image_build.rc == 0
+      tags: ['build', 'phase1']
+
+    - name: Phase 1 — Confirm image present
+      ansible.builtin.shell: |
+        nerdctl --address /run/k3s/containerd/containerd.sock --namespace k8s.io \
+          images --format '{{ "{{" }}.Repository{{ "}}" }}:{{ "{{" }}.Tag{{ "}}" }}' \
+          | grep -F '{{ webhook_image }}'
+      register: image_confirm
+      changed_when: false
+      tags: ['build', 'phase1']
+
+    - name: Phase 1 result
+      ansible.builtin.debug:
+        msg:
+          - "Image: {{ webhook_image }}"
+          - "Was already present: {{ image_exists.rc == 0 }}"
+          - "Confirmed in containerd: {{ image_confirm.rc == 0 }}"
+      tags: ['build', 'phase1']
+
+    # ──────────────────────────────────────────────────────────────────
+    # PHASE 2 — Cluster: RBAC, Deployment, Service, NetworkPolicy
+    # ──────────────────────────────────────────────────────────────────
+    - name: Phase 2 — Apply ServiceAccount (mlops ns)
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ repo_root }}/files/drift-webhook/k8s/serviceaccount.yaml"
+      tags: ['cluster', 'phase2']
+
+    - name: Phase 2 — Apply RBAC (Role + RoleBinding in kubeflow ns)
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ repo_root }}/files/drift-webhook/k8s/rbac.yaml"
+      tags: ['cluster', 'phase2']
+
+    - name: Phase 2 — Apply NetworkPolicy (allow mlops → ml-pipeline)
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ repo_root }}/files/drift-webhook/k8s/networkpolicy.yaml"
+      tags: ['cluster', 'phase2']
+
+    - name: Phase 2 — Apply Service (ClusterIP)
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ repo_root }}/files/drift-webhook/k8s/service.yaml"
+      tags: ['cluster', 'phase2']
+
+    - name: Phase 2 — Apply ServiceMonitor (Prometheus scrape)
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ repo_root }}/files/drift-webhook/k8s/servicemonitor.yaml"
+      tags: ['cluster', 'phase2']
+
+    - name: Phase 2 — Apply Deployment (last; references SA + image)
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ repo_root }}/files/drift-webhook/k8s/deployment.yaml"
+      tags: ['cluster', 'phase2']
+
+    - name: Phase 2 — Wait for deployment to be ready
+      ansible.builtin.command:
+        cmd: kubectl rollout status deployment/drift-webhook -n {{ webhook_namespace }} --timeout=120s
+      register: rollout_result
+      changed_when: false
+      tags: ['cluster', 'phase2']
+
+    - name: Phase 2 result
+      ansible.builtin.debug:
+        msg:
+          - "ServiceAccount, RBAC, NetworkPolicy, Service, ServiceMonitor, Deployment applied"
+          - "Rollout: {{ rollout_result.stdout | trim }}"
+      tags: ['cluster', 'phase2']
+
+    # ──────────────────────────────────────────────────────────────────
+    # PHASE 3 — Alertmanager wiring (Helm values verification)
+    # ──────────────────────────────────────────────────────────────────
+    - name: Phase 3 — Verify Alertmanager active config has webhook URL
+      ansible.builtin.shell: |
+        AM_POD=$(kubectl get pod -n {{ monitoring_namespace }} \
+          -l app.kubernetes.io/name=alertmanager \
+          -o jsonpath='{.items[0].metadata.name}')
+        kubectl exec -n {{ monitoring_namespace }} "$AM_POD" -c alertmanager -- \
+          cat /etc/alertmanager/config_out/alertmanager.env.yaml 2>/dev/null \
+          | grep -c "drift-webhook.{{ webhook_namespace }}"
+      register: am_config_check
+      changed_when: false
+      failed_when: false
+      tags: ['alertmanager', 'phase3']
+
+    - name: Phase 3 — Show Alertmanager config status
+      ansible.builtin.debug:
+        msg:
+          - "Webhook URL references in Alertmanager active config: {{ am_config_check.stdout | trim }}"
+          - "{{ 'Already configured.' if am_config_check.stdout | trim | int > 0 else 'NOT configured — set helm_upgrade=true to run upgrade.' }}"
+      tags: ['alertmanager', 'phase3']
+
+    - name: Phase 3 — Helm upgrade kube-prometheus-stack (only if helm_upgrade=true)
+      ansible.builtin.command:
+        cmd: >-
+          helm upgrade {{ prometheus_release }}
+          prometheus-community/kube-prometheus-stack
+          --namespace {{ monitoring_namespace }}
+          --version {{ prometheus_chart_version }}
+          --values {{ repo_root }}/files/monitoring/kube-prometheus-stack-values.yaml
+          --timeout 5m
+      register: helm_result
+      changed_when: helm_result.rc == 0
+      when: helm_upgrade | bool
+      tags: ['alertmanager', 'phase3']
+
+    - name: Phase 3 — Wait for Alertmanager config reload (post helm upgrade)
+      ansible.builtin.pause:
+        seconds: 30
+      when: helm_upgrade | bool and helm_result.rc == 0
+      tags: ['alertmanager', 'phase3']
+
+    - name: Phase 3 — Re-verify Alertmanager config after upgrade
+      ansible.builtin.shell: |
+        AM_POD=$(kubectl get pod -n {{ monitoring_namespace }} \
+          -l app.kubernetes.io/name=alertmanager \
+          -o jsonpath='{.items[0].metadata.name}')
+        kubectl exec -n {{ monitoring_namespace }} "$AM_POD" -c alertmanager -- \
+          cat /etc/alertmanager/config_out/alertmanager.env.yaml 2>/dev/null \
+          | grep -c "drift-webhook.{{ webhook_namespace }}"
+      register: am_config_recheck
+      changed_when: false
+      failed_when: am_config_recheck.stdout | trim | int == 0
+      when: helm_upgrade | bool
+      tags: ['alertmanager', 'phase3']
+
+    - name: Phase 3 result
+      ansible.builtin.debug:
+        msg:
+          - "Helm upgrade requested: {{ helm_upgrade }}"
+          - "Webhook URL active in Alertmanager: {{ (am_config_recheck.stdout if helm_upgrade else am_config_check.stdout) | default('?') | trim }}"
+      tags: ['alertmanager', 'phase3']
+
+    # ──────────────────────────────────────────────────────────────────
+    # PHASE 4 — Verify (deployment, health endpoint, RBAC, NetworkPolicy)
+    # ──────────────────────────────────────────────────────────────────
+    - name: Phase 4 — Verify deployment ready (1/1 replica)
+      ansible.builtin.shell: |
+        READY=$(kubectl get deployment drift-webhook -n {{ webhook_namespace }} \
+          -o jsonpath='{.status.readyReplicas}')
+        DESIRED=$(kubectl get deployment drift-webhook -n {{ webhook_namespace }} \
+          -o jsonpath='{.spec.replicas}')
+        echo "${READY:-0}/${DESIRED:-0}"
+      register: deploy_status
+      changed_when: false
+      failed_when: deploy_status.stdout | trim != "1/1"
+      tags: ['verify', 'phase4']
+
+    - name: Phase 4 — Verify /health endpoint (kfp_reachable must be true)
+      ansible.builtin.shell: |
+        kubectl exec -n {{ webhook_namespace }} deployment/drift-webhook -- python -c "
+        import urllib.request, json
+        r = urllib.request.urlopen('http://localhost:8080/health', timeout=10)
+        d = json.loads(r.read())
+        print(d.get('kfp_reachable', False))
+        "
+      register: health_check
+      changed_when: false
+      failed_when: "'True' not in health_check.stdout and 'true' not in health_check.stdout"
+      tags: ['verify', 'phase4']
+
+    - name: Phase 4 — Verify NetworkPolicy present in kubeflow ns
+      ansible.builtin.command:
+        cmd: kubectl get networkpolicy allow-drift-webhook-to-ml-pipeline -n {{ kubeflow_namespace }}
+      register: np_check
+      changed_when: false
+      tags: ['verify', 'phase4']
+
+    - name: Phase 4 — Run healthcheck section 8 (drift-webhook)
+      ansible.builtin.command:
+        cmd: "{{ repo_root }}/scripts/observability/healthcheck.sh webhook"
+      register: healthcheck_section8
+      changed_when: false
+      failed_when: false
+      tags: ['verify', 'phase4']
+
+    - name: Phase 4 result
+      ansible.builtin.debug:
+        msg:
+          - "Deployment status: {{ deploy_status.stdout | trim }}"
+          - "/health kfp_reachable: {{ health_check.stdout | trim }}"
+          - "NetworkPolicy: present"
+          - ""
+          - "{{ healthcheck_section8.stdout_lines | default(['(healthcheck section 8 not captured)']) }}"
+      tags: ['verify', 'phase4']
