@@ -1,0 +1,23 @@
+# files/drift-webhook/k8s/servicemonitor.yaml
+# Tells Prometheus to scrape drift-webhook /metrics endpoint.
+# Requires kube-prometheus-stack (Playbook 08) — provides this CRD.
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: drift-webhook
+  namespace: mlops
+  labels:
+    app: drift-webhook
+    release: prometheus              # Match the Helm release label so kube-prometheus-stack picks it up
+spec:
+  selector:
+    matchLabels:
+      app: drift-webhook
+  namespaceSelector:
+    matchNames:
+      - mlops
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s

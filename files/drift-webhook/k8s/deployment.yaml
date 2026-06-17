@@ -1,0 +1,86 @@
+# files/drift-webhook/k8s/deployment.yaml
+# Drift webhook server — FastAPI app that receives Alertmanager
+# ModelDriftDetected alerts and submits a KFP retraining pipeline run.
+#
+# Single replica is sufficient: webhook is stateless except for an
+# in-memory debounce dict (which is acceptable to lose on restart —
+# Alertmanager will re-send the alert on its next group_interval).
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: drift-webhook
+  namespace: mlops
+  labels:
+    app: drift-webhook
+    component: closed-loop-trigger
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: drift-webhook
+  template:
+    metadata:
+      labels:
+        app: drift-webhook
+        component: closed-loop-trigger
+      annotations:
+        # Tell Prometheus (legacy annotation-based discovery) to scrape /metrics.
+        # ServiceMonitor (modern CRD-based) also defined in servicemonitor.yaml.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: drift-webhook
+      containers:
+        - name: drift-webhook
+          image: "thesis/drift-webhook:0.1.1"
+          imagePullPolicy: Never           # Image is locally loaded into k3s containerd
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: KFP_HOST
+              value: "http://ml-pipeline.kubeflow.svc.cluster.local:8888"
+            - name: PIPELINE_NAME
+              value: "cmapss-rul-retraining"
+            - name: KFP_NAMESPACE
+              value: "kubeflow"
+            - name: EXPERIMENT_NAME
+              value: "cmapss-retraining-tests"
+            - name: DEBOUNCE_SECONDS
+              value: "300"
+            - name: RETRAIN_EPOCHS
+              value: "30"
+            - name: RETRAIN_THRESHOLD
+              value: "0.05"
+            - name: RETRAIN_BATCH_SIZE
+              value: "64"
+            - name: RETRAIN_LEARNING_RATE
+              value: "0.001"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5

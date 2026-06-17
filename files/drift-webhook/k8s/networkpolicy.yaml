@@ -1,0 +1,40 @@
+# files/drift-webhook/k8s/networkpolicy.yaml
+# Minimum-privilege NetworkPolicy granting the drift-webhook in mlops ns
+# permission to call ml-pipeline.kubeflow:8888.
+#
+# Why this exists:
+#   Kubeflow Pipelines standalone ships with default-allow-same-namespace
+#   in the kubeflow ns, which rejects all cross-namespace ingress. The
+#   drift webhook runs in mlops ns and must reach KFP API to submit runs.
+#
+# Scope:
+#   - Targets only ml-pipeline pods in kubeflow ns
+#   - Permits ingress only from mlops/drift-webhook on TCP/8888
+#   - Does not modify existing default-allow-same-namespace
+#     (NetworkPolicies are additive — OR logic)
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-drift-webhook-to-ml-pipeline
+  namespace: kubeflow
+  labels:
+    app: drift-webhook
+    component: closed-loop-trigger
+spec:
+  podSelector:
+    matchLabels:
+      app: ml-pipeline
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: mlops
+          podSelector:
+            matchLabels:
+              app: drift-webhook
+      ports:
+        - protocol: TCP
+          port: 8888

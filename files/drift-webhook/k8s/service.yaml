@@ -1,0 +1,22 @@
+# files/drift-webhook/k8s/service.yaml
+# ClusterIP service for the drift webhook.
+# Alertmanager (in monitoring ns) reaches it via:
+#   http://drift-webhook.mlops.svc.cluster.local:8080/webhook/drift
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: drift-webhook
+  namespace: mlops
+  labels:
+    app: drift-webhook
+    component: closed-loop-trigger
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: drift-webhook
