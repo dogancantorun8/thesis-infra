@@ -1,0 +1,10 @@
+# Webhook server runtime dependencies (kept minimal for fast image build)
+# Receives Alertmanager POST → triggers KFP pipeline run via ml-pipeline.kubeflow.svc API
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+pydantic==2.9.2
+prometheus-client==0.21.0
+requests==2.32.3
+# KFP SDK v2 — for triggering pipelines via the KFP API
+kfp==2.10.1
+kubernetes==30.1.0
