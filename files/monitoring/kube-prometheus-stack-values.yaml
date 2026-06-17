@@ -89,7 +89,22 @@ alertmanager:
           continue: true
     receivers:
       - name: 'default-void'
+
+      # Real webhook receiver — closed-loop trigger to KFP retraining
+      # via drift-webhook Deployment in mlops ns.
       - name: 'model-drift'
+        webhook_configs:
+          - url: 'http://drift-webhook.mlops.svc.cluster.local:8080/webhook/drift'
+            send_resolved: false       # Act only on firing, not on resolved
+            max_alerts: 1              # One KFP run per alert group; webhook
+                                       # handles further idempotency (running
+                                       # workflow check + 5-min debounce)
+            http_config:
+              follow_redirects: true
+              enable_http2: false      # KFP API is HTTP/1.1
+            # No auth — webhook accepts in-cluster traffic only
+            # (NetworkPolicy restricts source to mlops/drift-webhook)
+
       - name: 'critical-void'
     inhibit_rules:
       - source_matchers:

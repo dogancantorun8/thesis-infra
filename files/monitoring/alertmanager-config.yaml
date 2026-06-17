@@ -41,11 +41,25 @@ route:
       continue: true
 
 # Receivers
-# All currently use the "void" pattern (no webhook). In Adim 2D we will
-# replace `model-drift` with a real webhook (Slack, email, or KFP-trigger).
+# - default-void / critical-void: still no-ops (used as fallback)
+# - model-drift: real webhook → drift-webhook in mlops ns (closed loop)
+#                Triggers KFP retraining pipeline on every ModelDriftDetected fire.
 receivers:
   - name: 'default-void'
+
   - name: 'model-drift'
+    webhook_configs:
+      - url: 'http://drift-webhook.mlops.svc.cluster.local:8080/webhook/drift'
+        send_resolved: false       # We don't act on resolved drift; only on firing
+        max_alerts: 1              # Submit one KFP run per alert group (idempotency
+                                   # in webhook handles the rest — running workflow
+                                   # check + 5-minute debounce)
+        http_config:
+          follow_redirects: true
+          enable_http2: false      # KFP API is HTTP/1.1
+        # No basic_auth / bearer_token — webhook accepts in-cluster traffic only
+        # (NetworkPolicy + ServiceMonitor restrict access)
+
   - name: 'critical-void'
 
 # Inhibition rules — silence lower-severity alerts when higher fires
