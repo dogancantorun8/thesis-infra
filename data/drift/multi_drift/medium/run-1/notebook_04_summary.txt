@@ -44,7 +44,7 @@
 ──────────────────────────────────────────────────────────────────────
 
   Core system recovery  (T4-T1)     3.87 min     ← thesis primary result
-  Retraining + rollout  (T4-T2)     3.87 min     ← projected for Adim 4
+  Retraining + rollout  (T4-T2)     3.87 min     ← projected for Step 4
   Total measured        (T5-T1)    10.98 min
   Full cycle            (T5-T0)    13.28 min
 
@@ -86,7 +86,7 @@
 
   Manual workflow overhead
     Trigger lag (15.85 min) reflects manual notebook invocation.
-    Adim 4 (Alertmanager → KFP webhook) will reduce this to seconds.
+    Step 4 (Alertmanager → KFP webhook) will reduce this to seconds.
 
 ──────────────────────────────────────────────────────────────────────
   DEFENSE-READY STATEMENT
@@ -97,7 +97,7 @@
    including model retraining (3.5 min) and pod rollout
    (0.4 min). Manual workflow overhead
    (0.0 min trigger + 7.1 min verification)
-   reflects experiment design and will be eliminated in Adim 4
+   reflects experiment design and will be eliminated in Step 4
    by replacing manual triggers with an Alertmanager webhook to
    the Kubeflow retraining pipeline. Projected production recovery
    latency: 3.9 minutes.'

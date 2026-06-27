@@ -17,7 +17,7 @@
 #
 # Triggers (event-driven, no polling):
 #   - Notebook 03 last cell after alias promotion
-#   - KFP retraining pipeline (Adim 4)
+#   - KFP retraining pipeline (Step 4)
 #   - Manual operator action
 #
 # The Job is idempotent: if ConfigMap baseline version already

@@ -22,7 +22,7 @@ inventory/group_vars/vault.yml
 # END ANSIBLE MANAGED — Playbook 10 (data + dev env)
 *.bak
 
-# === Backup files from in-place patches (Adim 4 buildout) ===
+# === Backup files from in-place patches (Step 4 buildout) ===
 *.bak
 *.bak-*
 *.orig
@@ -33,7 +33,7 @@ inventory/group_vars/vault.yml
 *.pyo
 
 
-# === Backup files from in-place patches (Adim 4 buildout) ===
+# === Backup files from in-place patches (Step 4 buildout) ===
 *.bak
 *.bak-*
 *.orig

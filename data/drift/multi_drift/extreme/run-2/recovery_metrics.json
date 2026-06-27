@@ -2,7 +2,7 @@
   "experiment": {
     "name": "drift_simulation_recovery_latency",
     "notebook": "notebooks/04_drift_simulation.ipynb",
-    "thesis_step": "Adim 3",
+    "thesis_step": "Step 3",
     "executed_at": "2026-06-03T21:37:44.394698+00:00",
     "host": "Hetzner CCX23 (16GB RAM, CPU-only k3s)"
   },
@@ -33,7 +33,7 @@
     "retraining_plus_rollout_min": 3.992444233333333,
     "total_measured_min": 6.5051684000000005,
     "full_cycle_min": 8.8020174,
-    "projected_adim4_min": 3.992444233333333
+    "projected_step4_min": 3.992444233333333
   },
   "drift_signal": {
     "psi_at_T1_drift_detected": 0.1961,
@@ -75,7 +75,7 @@
     "manual_trigger_workflow": {
       "description": "Cell 6 manually triggers drift-check (skips hourly CronJob wait). Cell 7 manually invokes Notebook 03.",
       "impact": "Trigger lag (15.85 min) reflects manual workflow, not system capability.",
-      "status": "Adim 4 will eliminate via Alertmanager -> KFP webhook."
+      "status": "Step 4 will eliminate via Alertmanager -> KFP webhook."
     }
   }
 }

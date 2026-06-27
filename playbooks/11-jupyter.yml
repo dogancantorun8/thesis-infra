@@ -136,7 +136,7 @@
             systemctl restart jupyter-lab
             journalctl -u jupyter-lab -f          # live logs
 
-          Tezde anlamı:
+          Meaning in thesis:
             "Jupyter Lab is exposed as a systemd-managed service bound
             to 127.0.0.1:{{ jupyter_port }}. SSH port-forward is the
             authentication boundary — no token/password is exchanged."

@@ -5,7 +5,7 @@ MLflow @production model version, then update the cluster ConfigMap.
 Triggered by:
   - Notebook 03 last cell after model promotion (synchronous trigger)
   - Manual operator action after alias swap
-  - KFP retraining pipeline (Adim 4)
+  - KFP retraining pipeline (Step 4)
 
 Idempotent: if ConfigMap baseline version already matches MLflow alias,
 the script exits 0 without rewriting (no-op, fast).

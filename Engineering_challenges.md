@@ -883,7 +883,7 @@ The KFP SDK provides two distinct upload endpoints:
 - `client.upload_pipeline(...)` — creates a NEW pipeline; conflicts on existing name.
 - `client.upload_pipeline_version(pipeline_id=..., ...)` — uploads a NEW VERSION of an existing pipeline.
 
-The original `pipeline.py --upload` code used only the first. This is correct for first-time provisioning (Playbook 14, sıfırdan kurulum) but wrong for iterative development.
+The original `pipeline.py --upload` code used only the first. This is correct for first-time provisioning (Playbook 14, from-scratch setup) but wrong for iterative development.
 
 **Fix:**
 Made the upload logic in `kfp/retraining_pipeline.py` idempotent — it now detects an existing pipeline by display name and routes to the correct API:
@@ -923,7 +923,7 @@ This is the kind of subtle issue that surfaces only when the same code runs at t
 
 ## EC#27 — Cross-Namespace NetworkPolicy for Webhook → KFP
 
-**When:** Building the drift-webhook closed-loop trigger (Adim 5, Phase 4)
+**When:** Building the drift-webhook closed-loop trigger (Step 5, Phase 4)
 
 **Symptom:**
 After deploying the drift-webhook Deployment in `mlops` namespace, the `/health` endpoint persistently reported `kfp_reachable: false`. Direct verification from inside the webhook pod confirmed the issue:
@@ -994,7 +994,7 @@ Defense framing:
 
 ## EC#28 — Threshold Default Value Semantic (Continuation of EC#24)
 
-**When:** First end-to-end closed-loop run, triggered automatically by Alertmanager hot-reload (Adim 5, smoke test moment 22:38:05)
+**When:** First end-to-end closed-loop run, triggered automatically by Alertmanager hot-reload (Step 5, smoke test moment 22:38:05)
 
 **Symptom:**
 The closed loop fired automatically when the webhook receiver was wired in (Helm upgrade picked up the pending `ModelDriftDetected` alert and POSTed to the webhook). A KFP retraining run named `drift-triggered-baseline-v57-20260617-223805` started and completed all 17/17 components in ~15 minutes. v61 was registered:
@@ -1027,14 +1027,14 @@ if challenger_rmse < champion_rmse * (1 - threshold_factor):
     # 41.40 < 44.24 * 0.95 = 42.03  → True  → promote
 ```
 
-EC#24 (from Adim 4) identified this semantic inversion in the parameter naming. EC#28 documents its first observed real-world consequence: a numerically better challenger was rejected in a production-equivalent run.
+EC#24 (from Step 4) identified this semantic inversion in the parameter naming. EC#28 documents its first observed real-world consequence: a numerically better challenger was rejected in a production-equivalent run.
 
 **Fix:**
 Two-layer response:
 
-1. **Immediate (Adim 5, accepted)**: No code change. The rejection is the correct behavior for the configured threshold value, and the system protected production from auto-promotion. The closed-loop INFRASTRUCTURE was validated end-to-end; threshold parameter tuning is a separate governance concern.
+1. **Immediate (Step 5, accepted)**: No code change. The rejection is the correct behavior for the configured threshold value, and the system protected production from auto-promotion. The closed-loop INFRASTRUCTURE was validated end-to-end; threshold parameter tuning is a separate governance concern.
 
-2. **Planned (Adim 6 or post-defense)**:
+2. **Planned (Step 6 or post-defense)**:
    - Rename ENV var: `RETRAIN_THRESHOLD` → `MIN_IMPROVEMENT_FRACTION` (intent-revealing name).
    - Correct the formula in `register_model.py`:
      ```python
@@ -1057,7 +1057,7 @@ Defense framing:
 
 ## EC#29 — Helm Upgrade `--reuse-values` Pitfall
 
-**When:** Updating `kube-prometheus-stack` Helm values to add the drift-webhook receiver to Alertmanager (Adim 5, Phase 3)
+**When:** Updating `kube-prometheus-stack` Helm values to add the drift-webhook receiver to Alertmanager (Step 5, Phase 3)
 
 **Symptom:**
 After editing `files/monitoring/kube-prometheus-stack-values.yaml` to add the webhook receiver, the natural Helm upgrade command failed:
@@ -1115,7 +1115,7 @@ Defense framing:
 
 ## EC#30 — FastAPI `Response` vs `JSONResponse` for Prometheus Metrics
 
-**When:** Debugging the healthcheck section 8 metric parser, which reported `submitted=0 skipped=0` despite the raw `/metrics` endpoint showing `submitted=1.0` (Adim 5, Phase 7 — same evening as the closed-loop validation)
+**When:** Debugging the healthcheck section 8 metric parser, which reported `submitted=0 skipped=0` despite the raw `/metrics` endpoint showing `submitted=1.0` (Step 5, Phase 7 — same evening as the closed-loop validation)
 
 **Symptom:**
 The `/metrics` endpoint returned data, but with subtle pathology:

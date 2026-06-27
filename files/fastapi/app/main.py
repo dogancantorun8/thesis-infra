@@ -82,7 +82,7 @@ class ModelHolder:
             #   - Stages (deprecated)             — e.g. stages=['Production']
             # Both loading AND version reporting must use the same path,
             # otherwise alias-loaded model is reported with stage-based
-            # version (the bug we hit in Adim 3 pre-flight check).
+            # version (the bug we hit in Step 3 pre-flight check).
             client = mlflow.tracking.MlflowClient()
             loaded_via_alias = False
 

@@ -120,7 +120,7 @@ flowchart TB
 
 5. **kubeflow namespace**: Kubeflow Pipelines Standalone — pipeline orchestration only. Notebooks, Katib, KServe, Dex, Istio are deliberately omitted; they would consume ~4 GB extra RAM and add no thesis value. Replaced by VSCode Remote-SSH (notebooks), Optuna (HP search), and FastAPI (serving).
 
-6. **monitoring namespace**: Prometheus scrapes pod metrics across all namespaces (currently 15+ UP scrape targets including FastAPI via ServiceMonitor); Grafana visualizes them through 25+ pre-built Kubernetes dashboards. Evidently `drift-check` CronJob runs hourly, computing PSI and KS-test statistics from the production prediction histogram against the training baseline, pushing results to Pushgateway, and firing an Alertmanager webhook when drift exceeds the threshold (PSI ≥ 0.2). The `baseline-refresh` Kubernetes Job (Playbook 13) keeps the baseline ConfigMap synchronized with the current MLflow `@production` alias: after model promotion, it runs inference on training data, regenerates the baseline distribution, and writes to both the cluster ConfigMap and host disk in ~7 seconds. Alertmanager fires webhooks on threshold breach — in Adım 4 this becomes the trigger for the fully automated closed-loop retraining cycle.
+6. **monitoring namespace**: Prometheus scrapes pod metrics across all namespaces (currently 15+ UP scrape targets including FastAPI via ServiceMonitor); Grafana visualizes them through 25+ pre-built Kubernetes dashboards. Evidently `drift-check` CronJob runs hourly, computing PSI and KS-test statistics from the production prediction histogram against the training baseline, pushing results to Pushgateway, and firing an Alertmanager webhook when drift exceeds the threshold (PSI ≥ 0.2). The `baseline-refresh` Kubernetes Job (Playbook 13) keeps the baseline ConfigMap synchronized with the current MLflow `@production` alias: after model promotion, it runs inference on training data, regenerates the baseline distribution, and writes to both the cluster ConfigMap and host disk in ~7 seconds. Alertmanager fires webhooks on threshold breach — in Step 4 this becomes the trigger for the fully automated closed-loop retraining cycle.
 
 7. **Dev environment & DVC**: A Python 3.12 virtual environment with DVC, MLflow, PyTorch (CPU), Evidently, and Optuna. The C-MAPSS dataset is versioned by DVC — the 13 `.txt` files (~17 MB) live in MinIO bucket `thesis-data/dvc/`, while only a 300-byte metadata pointer (`cmapss.dvc`) is committed to Git. Reproducing the exact dataset used by any commit is a two-step recipe: `git checkout <hash>` then `dvc pull`.
 
@@ -145,7 +145,7 @@ flowchart TD
     E --> F{PSI exceeds 0.2?}
     F -- No --> G[Continue monitoring]
     F -- Yes --> H[Alertmanager webhook]
-    H --> I[KFP retraining pipeline - Adim 4]
+    H --> I[KFP retraining pipeline - Step 4]
     I --> J[MLflow: new model version + @production alias swap]
     J --> P[Notebook 03 Cell 10 / KFP equivalent]
     P --> Q[baseline-refresh Job]
@@ -168,12 +168,12 @@ flowchart TD
 
 **Measured metric:** `drift-to-recovery latency` — wall-clock time from drift detection (T1) to the new model serving traffic (T4 or T5).
 
-### Adım 3 Results (measured 2026-05-24, Notebook 04 fresh run)
+### Step 3 Results (measured 2026-05-24, Notebook 04 fresh run)
 
 | Phase | Duration | Type |
 |---|---|---|
 | T0 → T1 (detection lag) | 2.29 min | system |
-| T1 → T2 (trigger lag) | 0.00 min | manual (Adım 4: ~0 sec via webhook) |
+| T1 → T2 (trigger lag) | 0.00 min | manual (Step 4: ~0 sec via webhook) |
 | T2 → T_RT (retraining) | 3.13 min | system |
 | T_RT → T4 (pod rollout) | 0.41 min | system |
 | T4 → T5 (verification loop) | 7.11 min | experiment overhead |
@@ -188,7 +188,7 @@ from FD002 (different operating regimes), recovered by sending 300
 normal FD001-distributed predictions over three iterations. The
 `baseline-refresh` Kubernetes Job and the FastAPI rolling restart are
 chained in Notebook 03 Cell 10 — the same three-step sequence will run
-as KFP pipeline components in Adım 4.
+as KFP pipeline components in Step 4.
 
 ---
 
@@ -223,7 +223,7 @@ thesis-infra/
 │   ├── 11-jupyter.yml           # Jupyter Lab dev server (127.0.0.1)  [done]
 │   ├── 12-evidently.yml         # Drift-check CronJob (PSI + KS)      [done]
 │   ├── 13-baseline-refresh.yml  # Baseline ConfigMap sync Job         [done]
-│   └── 14-kfp-retraining.yml    # KFP pipeline + webhook (Adim 4)     [planned]
+│   └── 14-kfp-retraining.yml    # KFP pipeline + webhook (Step 4)     [planned]
 │
 ├── files/                       # Static configs (Helm values, manifests, app code)
 │   ├── postgres/                # PostgreSQL init SQL

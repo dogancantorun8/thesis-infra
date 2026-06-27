@@ -1,7 +1,7 @@
 {
   "experiment": {
     "name": "drift_recovery_latency_multi_run_validation",
-    "purpose": "Statistical validation of single-run measurement in Adim 3",
+    "purpose": "Statistical validation of single-run measurement in Step 3",
     "executed_at": "2026-05-25T13:22:50.565800+00:00",
     "host": "Hetzner CCX23 (16GB RAM, CPU-only k3s)",
     "n_runs": 3,
