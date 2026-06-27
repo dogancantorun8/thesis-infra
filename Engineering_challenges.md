@@ -4,7 +4,7 @@
 >
 > The documentation pattern itself is a thesis contribution — *"what could go wrong, and how it was discovered"* is as important as the architecture.
 
-**Total entries:** 22
+**Total entries:** 30
 **Format:** Title / When / Symptom / Root Cause / Fix / Notes
 **Referenced in thesis:** Chapter 4 (Implementation) Section 4.5 — "Engineering Challenges Encountered"
 
@@ -40,6 +40,10 @@
 | 24 | **Threshold factor semantic inversion** | Model Registry | Resolved |
 | 25 | **Notebook-to-script training reproducibility gap** | ML Reproducibility | Documented as finding |
 | 26 | Idempotent KFP pipeline deployment | KFP Pipeline | Resolved |
+| 27 | Cross-namespace NetworkPolicy for webhook → KFP | Kubernetes Networking | Resolved |
+| 28 | **Threshold default value semantic (continuation of EC#24)** | Model Registry | Resolved |
+| 29 | Helm upgrade `--reuse-values` pitfall | Helm / Deployment | Resolved |
+| 30 | FastAPI `Response` vs `JSONResponse` for Prometheus metrics | API Logic | Resolved |
 
 **Bold entries** are defense-critical findings emphasized in the thesis.
 
