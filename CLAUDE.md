@@ -63,7 +63,7 @@ latency, retraining cost, drift-to-recovery latency, monitoring overhead)?
 
 **The headline metric** the thesis measures is **drift-to-recovery latency**:
 the elapsed wall-clock time from drift detection to a better model live in
-production. The closed-loop demo (Adım 5 — see below) operationalizes this
+production. The closed-loop demo (Step 5 — see below) operationalizes this
 measurement.
 
 ---
@@ -170,15 +170,15 @@ run-without-human-intervention is the defense-critical demonstration.
 │   ├── 11-jupyter.yml               # Jupyter Lab (notebook 01-04)
 │   ├── 12-dvc.yml                   # DVC remote config (MinIO backend)
 │   ├── 13-baseline-refresh.yml      # Baseline reset on promotion
-│   ├── 14-retraining-pipeline.yml   # KFP pipeline provisioning (Adım 4)
-│   └── 15-drift-webhook.yml         # Closed-loop trigger (Adım 5)
+│   ├── 14-retraining-pipeline.yml   # KFP pipeline provisioning (Step 4)
+│   └── 15-drift-webhook.yml         # Closed-loop trigger (Step 5)
 │
 ├── site.yml                         # Runs everything in order
 │
 ├── files/                           # Static files referenced by playbooks
 │   ├── fastapi/                     # Dockerfile, app/, k8s/, src/
 │   ├── retraining/                  # KFP component Dockerfile + scripts
-│   ├── drift-webhook/               # FastAPI webhook + manifests (Adım 5)
+│   ├── drift-webhook/               # FastAPI webhook + manifests (Step 5)
 │   ├── monitoring/                  # Prometheus rules, AM config, etc.
 │   ├── evidently/                   # Drift check script (in container)
 │   └── ...                          # mlflow, minio, postgres, etc.
@@ -199,24 +199,24 @@ run-without-human-intervention is the defense-critical demonstration.
 │   ├── 04-ml/                       # KFP pipeline + retraining
 │   └── run-all.sh                   # CI entrypoint
 │
-└── docs/                            # Long-form summaries per Adım
-    ├── FASTAPI_PRODUCTION_DEPLOYMENT_TR.md         (Adım 2)
-    ├── CLOSED_LOOP_DRIFT_WEBHOOK_TR.md             (Adım 5)
+└── docs/                            # Long-form summaries per Step
+    ├── FASTAPI_PRODUCTION_DEPLOYMENT_TR.md         (Step 2)
+    ├── CLOSED_LOOP_DRIFT_WEBHOOK_TR.md             (Step 5)
     └── ...
 ```
 
 ---
 
-## 4. Development Timeline — Which Adım Did What
+## 4. Development Timeline — Which Step Did What
 
-The implementation was split into **six sequential phases (Adım = "Step"
-in Turkish)** corresponding roughly to the 8-week thesis schedule. Each
-Adım produced a long-form summary in Turkish (see `docs/`), a set of
+The implementation was split into **six sequential phases (Steps)**
+corresponding roughly to the six-month thesis schedule. Each
+Step produced a long-form summary in Turkish (see `docs/`), a set of
 git commits, and entries in `Engineering_challenges.md`. Knowing which
-Adım introduced what is critical for any AI assistant — the system
+Step introduced what is critical for any AI assistant — the system
 evolved incrementally and earlier conventions inform later ones.
 
-| Adım | Theme | Output | Key files |
+| Step | Theme | Output | Key files |
 |------|-------|--------|-----------|
 | **1** | Infrastructure foundations | k3s cluster, MinIO, PostgreSQL, Helm tools, monitoring base | Playbooks 01-08 |
 | **2** | Real-model serving | FastAPI v0.2.x serving real LSTM (not stub), MLflow alias-based load | `files/fastapi/`, Notebook 03 |
@@ -225,9 +225,9 @@ evolved incrementally and earlier conventions inform later ones.
 | **5** | **Closed-loop trigger** | drift-webhook FastAPI + Alertmanager wiring + cross-ns NetworkPolicy + Playbook 15 | `files/drift-webhook/`, Playbook 15 |
 | **6** | Thesis writing | (No infrastructure changes; this is the writing phase) | `thesis/` (separate repo) |
 
-**The implementation is complete as of 18 June 2026.** Adım 5 closed the
-loop; Adım 6 is the writing-only phase. AI assistants encountering this
-repo after Adım 5 should treat the system as **feature-complete** —
+**The implementation is complete as of 18 June 2026.** Step 5 closed the
+loop; Step 6 is the writing-only phase. AI assistants encountering this
+repo after Step 5 should treat the system as **feature-complete** —
 new changes should be bug fixes, documentation, or refactors, not new
 features. The only sanctioned new work is the *threshold semantic
 correction* documented in EC#28 (a parameter rename + formula fix),
@@ -327,20 +327,20 @@ These are rules learned the hard way. Violating them creates EC entries.
   optional but valuable. Numbering is monotonic; gaps are intentional
   (e.g. EC#25 is reserved for the open data-versioning question — don't
   reuse it).
-- **Adım summary docs are Turkish.** Long-form per-phase summaries
+- **Step summary docs are Turkish.** Long-form per-phase summaries
   (`FASTAPI_PRODUCTION_DEPLOYMENT_TR.md`, `CLOSED_LOOP_DRIFT_WEBHOOK_TR.md`,
   etc.) are in Turkish — that's the language of the thesis defense.
   Don't translate them to English. New summaries should follow the same
-  pattern: numbered sections 1–13 covering amaç / neden / hedef /
-  fazın yapısı / mimari / engineering problems / image versioning /
-  test stratejisi / tezdeki yeri / defansa hazır cümleler / sıradaki
-  adımlar / versiyon geçmişi / sistem durumu.
+  pattern: numbered sections 1–13 covering purpose / rationale / goal /
+  phase structure / architecture / engineering problems / image versioning /
+  test strategy / place in the thesis / defense-ready statements / next
+  steps / version history / system status.
 - **Commits reference EC numbers.** `feat(drift-webhook): K8s manifests
   + cross-ns NetworkPolicy` body mentions "will be documented as EC#27".
   Keep this discipline.
 - **Code & docs are English; chat is Turkish.** This is the bilingual
   convention. Comments, commit messages, doc strings, variable names —
-  English. Conversation-level docs (Adım summaries, defense Q&A) —
+  English. Conversation-level docs (Step summaries, defense Q&A) —
   Turkish.
 
 ---
@@ -388,12 +388,12 @@ Are you modifying behavior?
 │         └── NO  → Write a new EC entry covering the change
 │
 └── NO → Is it documentation only?
-         ├── YES → No EC needed; update the relevant Adım summary
+         ├── YES → No EC needed; update the relevant Step summary
          │        if the change is significant
          └── NO  → (typo / formatting / comment) → just commit
 
 Is the change a new feature?
-├── YES → STOP. The implementation is complete (Adım 5).
+├── YES → STOP. The implementation is complete (Step 5).
 │         New features should be discussed with the thesis author
 │         first. Acceptable exceptions: EC#28 threshold rename
 │         (already planned), Grafana CrashLoop fix (EC#31 candidate).
@@ -444,7 +444,7 @@ Layers:
 5. **Service responses** — HTTP health endpoints
 6. **Model state consistency** — MLflow alias / FastAPI version / drift baseline agreement
 7. **KFP retraining pipeline** — pipeline registered, image present, workflow history
-8. **Drift webhook** — deployment, /health, NetworkPolicy, Alertmanager config (Adım 5)
+8. **Drift webhook** — deployment, /health, NetworkPolicy, Alertmanager config (Step 5)
 
 A healthy cluster reports **40 PASS** (sometimes 41, depending on
 workflow history). 1 FAIL on `ns/monitoring: 1 of 11 pods NOT ready` is
@@ -486,10 +486,10 @@ answer with citations.
 | Question | Answer location |
 |----------|-----------------|
 | "Is your model really in production?" | `curl http://localhost:8000/` → `is_stub: false, model_version: "57"`. See FASTAPI_PRODUCTION_DEPLOYMENT_TR.md §10. |
-| "How is your loop actually closed?" | Adım 5 timeline: 22:38:05 auto-trigger. See CLOSED_LOOP_DRIFT_WEBHOOK_TR.md §8. |
+| "How is your loop actually closed?" | Step 5 timeline: 22:38:05 auto-trigger. See CLOSED_LOOP_DRIFT_WEBHOOK_TR.md §8. |
 | "Why didn't the better model (v61) get promoted?" | Champion-challenger safety gate. EC#28 + CLOSED_LOOP_DRIFT_WEBHOOK_TR.md §10. |
 | "How do you handle cross-namespace security?" | Explicit NetworkPolicy per integration. EC#27. |
-| "What if the webhook fails?" | Idempotency + Alertmanager retry (1h `repeat_interval`). Smoke Test #2 in Adım 5 summary. |
+| "What if the webhook fails?" | Idempotency + Alertmanager retry (1h `repeat_interval`). Smoke Test #2 in Step 5 summary. |
 | "How reproducible is your stack?" | `ansible-playbook site.yml --ask-vault-pass` on clean Ubuntu 22.04. 50 minutes. |
 | "Why open-source instead of managed cloud?" | Air-gapped defense deployment. Thesis Proposal §1.2 + §3.4. |
 | "How many engineering challenges did you encounter?" | 30 documented EC's; 97% resolved; 1 reserved as open finding (EC#25). Engineering_challenges.md §Overall Assessment. |
@@ -511,7 +511,7 @@ A non-exhaustive list of footguns:
 - **❌ Set `imagePullPolicy: IfNotPresent` for locally-built images.** Use `Never`.
 - **❌ Reproduce histograms from bucket counts for KS-test.** EC#16 — use raw data.
 - **❌ Hardcode "defense-ready" values in reusable notebook cells.** EC#19.
-- **❌ Add new features without consulting the thesis author.** Adım 5 closed the loop; the implementation is feature-complete.
+- **❌ Add new features without consulting the thesis author.** Step 5 closed the loop; the implementation is feature-complete.
 - **❌ Use the `kubectl exec ... python -c "..."` pattern when escaping is involved.** Use `kubectl exec -i ... python <<HEREDOC` to avoid quoting hell. (Discovered while fixing healthcheck section 8 metric parsing.)
 
 ---
@@ -545,7 +545,7 @@ care:
    current default value (0.05 → 20× improvement required → effectively
    "never auto-promote", which is the safe default for a thesis demo).
 
-5. **N-CMAPSS drift simulation (deferred from Adım 6 thesis plan).**
+5. **N-CMAPSS drift simulation (deferred from Step 6 thesis plan).**
    Notebook 04 mentioned in the implementation guide was intended to
    inject FD002 data into an FD001-trained model and measure recovery
    latency. The closed loop itself is validated; full drift simulation
@@ -561,7 +561,7 @@ working in this repo, please:
 
 - **Read this file fully before suggesting changes.** It encodes
   decisions that are not derivable from the code.
-- **Quote EC numbers and Adım summaries when relevant.** They are the
+- **Quote EC numbers and Step summaries when relevant.** They are the
   canonical record. Avoid paraphrasing them in your own words when a
   direct reference suffices.
 - **Propose changes incrementally.** A single commit per logical unit.
@@ -573,7 +573,7 @@ working in this repo, please:
   If a previously-documented bug recurs, write a new EC referencing
   the old one ("EC#16 manifests at scale" pattern, like EC#21).
 - **Respect the Turkish/English bilingual convention.** Code, comments,
-  commit messages, EC entries — English. Adım summaries — Turkish.
+  commit messages, EC entries — English. Step summaries — Turkish.
 - **Be honest about uncertainty.** If a change touches an area you
   haven't fully understood (e.g. Argo Workflow semantics, kube-prometheus
   rule evaluation), flag it. The thesis author can verify on the
@@ -583,20 +583,7 @@ working in this repo, please:
 
 ---
 
-## 14. Pointers
-
-- **Thesis proposal**: `N_Thesis_Proposal_Self_Updating_Predictive_Maintenance.docx`
-- **8-week implementation guide**: `N_Implementation_Guide_8_Weeks_TR.docx` (Turkish), `N_Implementation_Guide_8_Weeks_EN.docx` (English)
-- **Architecture diagram**: `N_Mimari_Diyagram.docx` + `N_Mimari_Diyagram.png`
-- **Technical implementation guide**: `N_Technical_Implementation_Guide.docx`
-- **Modular playbook narrative**: `N_Modular_Ansible_Playbooks.docx`
-- **Engineering challenges log**: `Engineering_challenges.md` (v2.2, 30 entries)
-- **Adım 2 summary** (FastAPI production deployment): `docs/FASTAPI_PRODUCTION_DEPLOYMENT_TR.md`
-- **Adım 5 summary** (closed-loop drift webhook): `docs/CLOSED_LOOP_DRIFT_WEBHOOK_TR.md`
-
----
-
-## 15. Quick Start — If You're New
+## 14. Quick Start — If You're New
 
 ```bash
 # 1. Read this file (you're doing it).
@@ -626,7 +613,7 @@ anticipate, and that itself is worth documenting (as a new EC).
 
 ---
 
-## 16. Final Word
+## 15. Final Word
 
 This thesis was built over six months, evolved through 30 documented engineering challenges, and culminated in an automatically-validated closed-loop system. The implementation is honest, the bugs are documented, and the system runs end-to-end without human intervention.
 
