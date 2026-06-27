@@ -129,7 +129,7 @@ the champion (RMSE on a held-out set), and either promotes (with
 auto-rollout to FastAPI + baseline refresh in the drift detector) or
 rejects (production stays on the existing model, drift event logged).
 
-**Validated in production on 17 June 2026 at 22:38:05** — a Helm upgrade
+**Validated in production** — a Helm upgrade
 applied the new Alertmanager webhook receiver, and within seconds the
 pending firing drift alert was forwarded to the webhook, which submitted
 a KFP run that completed all 17/17 components in ~15 minutes. The system
