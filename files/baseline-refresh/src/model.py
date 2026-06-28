@@ -54,6 +54,34 @@ class LSTMRegressor(nn.Module):
 
         self.fc = nn.Linear(hidden_size, 1)
 
+        # ─── EC#32 FIX: Forget gate bias = 1 ───────────────────────────
+        # PyTorch default LSTM bias = 0 → forget_gate = sigmoid(0) = 0.5,
+        # which causes weak gradient flow in stacked LSTMs. The model
+        # plateaus at "mean prediction" baseline for 20-30 epochs before
+        # escape (script execution) or sometimes never escapes.
+        #
+        # Setting forget gate bias = 1 → forget_gate = sigmoid(1) ≈ 0.73,
+        # enabling proper long-term dependency learning from epoch 1.
+        # This is established LSTM best practice.
+        #
+        # Reference: Jozefowicz et al. (2015) "An Empirical Exploration
+        # of Recurrent Network Architectures", ICML.
+        self._init_forget_gate_bias()
+
+    def _init_forget_gate_bias(self) -> None:
+        """Initialize forget gate bias to 1 for all LSTM layers.
+
+        PyTorch LSTM bias order per layer:
+            [input_gate, forget_gate, cell_gate, output_gate]
+        Each gate uses hidden_size weights, so forget gate occupies
+        indices [hidden_size : 2*hidden_size] of the bias tensor.
+        """
+        for name, param in self.lstm.named_parameters():
+            if "bias" in name:
+                n = param.size(0)
+                h = n // 4
+                param.data[h:2 * h].fill_(1.0)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward pass.
@@ -88,3 +116,14 @@ if __name__ == "__main__":
     print(f"Input shape:  {tuple(dummy_input.shape)}")
     print(f"Output shape: {tuple(output.shape)}")
     print(f"Total trainable parameters: {count_parameters(model):,}")
+
+    # Verify forget gate bias init
+    print()
+    print("Forget gate bias check (should be 1.0):")
+    for name, param in model.lstm.named_parameters():
+        if "bias" in name:
+            n = param.size(0)
+            h = n // 4
+            fg_bias = param.data[h:2*h]
+            print(f"  {name}: forget gate bias mean = {fg_bias.mean().item():.4f} "
+                  f"(min={fg_bias.min().item():.4f}, max={fg_bias.max().item():.4f})")

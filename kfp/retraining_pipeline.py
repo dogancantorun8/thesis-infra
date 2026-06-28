@@ -46,7 +46,7 @@ PIPELINE_DESCRIPTION = (
     "Drift-triggered LSTM retraining + champion-challenger + auto-rollout. "
     "Replaces manual Notebook 03 invocation (closes the closed-loop)."
 )
-IMAGE = "thesis/retraining:0.4.0"
+IMAGE = "thesis/retraining:0.5.0"
 
 # In-cluster service endpoints
 DEFAULT_S3_ENDPOINT = "http://minio.minio.svc.cluster.local:9000"

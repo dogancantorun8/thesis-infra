@@ -282,7 +282,7 @@ deploymentSpec:
           value: http://minio.minio.svc.cluster.local:9000
         - name: AWS_DEFAULT_REGION
           value: us-east-1
-        image: thesis/retraining:0.4.0
+        image: thesis/retraining:0.5.0
     exec-register-model-op:
       container:
         args:
@@ -304,7 +304,7 @@ deploymentSpec:
           value: http://minio.minio.svc.cluster.local:9000
         - name: AWS_DEFAULT_REGION
           value: us-east-1
-        image: thesis/retraining:0.4.0
+        image: thesis/retraining:0.5.0
     exec-train-lstm-op:
       container:
         args:
@@ -328,7 +328,7 @@ deploymentSpec:
           value: http://minio.minio.svc.cluster.local:9000
         - name: AWS_DEFAULT_REGION
           value: us-east-1
-        image: thesis/retraining:0.4.0
+        image: thesis/retraining:0.5.0
     exec-trigger-rollout-op:
       container:
         args:
@@ -341,7 +341,7 @@ deploymentSpec:
         command:
         - python
         - /app/trigger_rollout.py
-        image: thesis/retraining:0.4.0
+        image: thesis/retraining:0.5.0
 pipelineInfo:
   description: Drift-triggered LSTM retraining + champion-challenger + auto-rollout.
     Replaces manual Notebook 03 invocation (closes the closed-loop).
