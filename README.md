@@ -28,7 +28,7 @@ All components are 100 % open source and run on a single VM, making the stack re
 
 ---
 
-## 2. Closed-Loop Retraining Flow *(thesis Figure 1.1)*
+## 2. Closed-Loop Retraining Flow
 
 ```mermaid
 flowchart TD
@@ -67,7 +67,7 @@ flowchart TD
 
 ---
 
-## 3. Deployment Topology *(thesis Figure 3.1)*
+## 3. Deployment Topology 
 
 ```mermaid
 flowchart TB
@@ -170,7 +170,7 @@ flowchart TB
 
 ---
 
-## 4. Data & Training Flow *(thesis Figure 3.2)*
+## 4. Data & Training Flow
 
 ```mermaid
 flowchart LR
