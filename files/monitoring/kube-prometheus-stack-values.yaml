@@ -29,6 +29,10 @@ prometheus:
 
 # --- Grafana ---
 grafana:
+  deploymentStrategy:
+    type: Recreate
+  initChownData:
+    enabled: false
   adminPassword: "PLACEHOLDER_OVERRIDDEN_BY_ANSIBLE"
   persistence:
     enabled: true
